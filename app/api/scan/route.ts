@@ -39,27 +39,33 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ message: "Already attended today", type: "admin" }, { status: 400 })
         }
 
-        // Add attendance
+        // Add attendance record
         await supabase.from("attendance").insert({ user_id: userId })
 
-        // Update apples
-        const { data: user } = await supabase
+        const { data: user } = await supabase.from("users").select("apples").eq("id", userId).single()
+
+        const newApples = (user?.apples || 0) + 150
+
+        const { data: updatedUser } = await supabase
           .from("users")
-          .update({ apples: supabase.rpc("increment_apples", { user_id: userId, amount: 150 }) })
+          .update({ apples: newApples })
           .eq("id", userId)
-          .select()
+          .select("name, apples")
           .single()
 
-        // Check for loyalty bonus
+        // Check for loyalty bonus (4+ attendances in current week)
         const currentWeek = getISOWeek(new Date())
+        const weekStart = new Date()
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1)
+
         const { data: weekAttendances } = await supabase
           .from("attendance")
           .select("id")
           .eq("user_id", userId)
-          .gte("attendance_date", new Date().toISOString().split("T")[0])
+          .gte("attendance_date", weekStart.toISOString())
 
         let loyaltyAdded = 0
-        if ((weekAttendances?.length || 0) >= 3) {
+        if ((weekAttendances?.length || 0) >= 4) {
           const { data: existingBonus } = await supabase
             .from("loyalty_history")
             .select("id")
@@ -68,20 +74,31 @@ export async function POST(request: NextRequest) {
             .single()
 
           if (!existingBonus) {
-            await supabase.from("loyalty_history").insert({ user_id: userId, week: currentWeek })
-            await supabase.rpc("increment_apples", { user_id: userId, amount: 50 })
+            const { data: currentUser } = await supabase.from("users").select("apples").eq("id", userId).single()
+
+            const applesWithBonus = (currentUser?.apples || 0) + 50
+
+            await supabase.from("users").update({ apples: applesWithBonus }).eq("id", userId)
+
+            await supabase.from("loyalty_history").insert({
+              user_id: userId,
+              week: currentWeek,
+              bonus_apples: 50,
+            })
             loyaltyAdded = 50
           }
         }
 
-        const { data: updatedUser } = await supabase.from("users").select("name, apples").eq("id", userId).single()
+        const { data: finalUser } = await supabase.from("users").select("name, apples").eq("id", userId).single()
 
         return NextResponse.json({
+          success: true,
           type: "admin",
-          name: updatedUser?.name,
-          apples: updatedUser?.apples,
+          name: finalUser?.name,
+          apples: finalUser?.apples,
           applesAdded: 150,
           loyaltyAdded: loyaltyAdded > 0 ? loyaltyAdded : undefined,
+          message: `Attendance recorded! +150 apples${loyaltyAdded > 0 ? ` + ${loyaltyAdded} loyalty bonus` : ""}`,
         })
       } else if (isStudent) {
         const { data: student } = await supabase
@@ -95,10 +112,12 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json({
+          success: true,
           type: "student",
           name: student.name,
           apples: student.apples,
           studentId: student.id,
+          message: `Student found: ${student.name}`,
         })
       } else if (isAssistant) {
         const { data: assistant } = await supabase
@@ -113,10 +132,12 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json({
+          success: true,
           type: "assistant",
           name: assistant.name,
           apples: assistant.apples,
           assistantId: assistant.id,
+          message: `Assistant found: ${assistant.name}`,
         })
       } else {
         return NextResponse.json(
@@ -145,10 +166,12 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({
+        success: true,
         type: "student",
         name: student.name,
         apples: student.apples,
         studentId: student.id,
+        message: `Student found: ${student.name}`,
       })
     }
 

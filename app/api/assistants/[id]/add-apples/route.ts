@@ -10,7 +10,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ message: "Invalid apple amount" }, { status: 400 })
     }
 
-    // Update assistant apples
     const { data: assistant, error } = await supabase
       .from("users")
       .select("id, name, apples")
@@ -40,9 +39,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     })
 
     return NextResponse.json({
+      success: true,
       name: updatedAssistant?.name,
       apples: updatedAssistant?.apples,
       applesAdded: apples,
+      message: `${apples > 0 ? "Added" : "Subtracted"} ${Math.abs(apples)} apples`,
     })
   } catch (error) {
     console.error("[v0] Add assistant apples error:", error)
