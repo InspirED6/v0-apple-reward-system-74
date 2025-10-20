@@ -53,6 +53,8 @@ export default function LoginPage() {
       })
 
       sessionStorage.setItem("userId", data.id)
+      sessionStorage.setItem("userName", data.name)
+      sessionStorage.setItem("userRole", data.role)
 
       // Redirect to dashboard
       router.push(`/dashboard/${data.name}?role=${data.role}`)
