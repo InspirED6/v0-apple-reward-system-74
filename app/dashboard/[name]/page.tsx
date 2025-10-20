@@ -18,6 +18,13 @@ interface AssistantData {
   loyaltyHistory: Array<{ week: string; bonus_apples: number }>
 }
 
+interface StudentData {
+  id: string
+  name: string
+  barcode: string
+  apples: number
+}
+
 interface DashboardData {
   name: string
   barcode: string
@@ -27,9 +34,12 @@ interface DashboardData {
 }
 
 export default function Dashboard({ params }: { params: { name: string } }) {
-  const [data, setData] = useState<DashboardData | AssistantData[] | null>(null)
+  const [data, setData] = useState<DashboardData | AssistantData[] | StudentData[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [viewType, setViewType] = useState<"assistants" | "students">("assistants")
+  const [totalApples, setTotalApples] = useState(0)
+  const [paying, setPaying] = useState(false)
   const { toast } = useToast()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -43,40 +53,90 @@ export default function Dashboard({ params }: { params: { name: string } }) {
       return
     }
 
-    const fetchData = async () => {
-      try {
-        const response = await fetch(`/api/dashboard/${encodeURIComponent(decodedName)}?role=${role}`)
-        const result = await response.json()
+    fetchData()
+  }, [decodedName, role, viewType, router])
 
-        if (!response.ok) {
-          toast({
-            title: "Error",
-            description: result.message || "Failed to load data",
-            variant: "destructive",
-          })
-          return
-        }
+  const fetchData = async () => {
+    try {
+      const response = await fetch(
+        `/api/dashboard/${encodeURIComponent(decodedName)}?role=${role}&viewType=${viewType}`,
+      )
+      const result = await response.json()
 
-        if (result.isAdmin) {
-          setIsAdmin(true)
-          setData(result.assistants)
-        } else {
-          setIsAdmin(false)
-          setData(result)
-        }
-      } catch (error) {
+      if (!response.ok) {
         toast({
           title: "Error",
-          description: "Failed to load data",
+          description: result.message || "Failed to load data",
           variant: "destructive",
         })
-      } finally {
-        setLoading(false)
+        return
       }
+
+      if (result.isAdmin) {
+        setIsAdmin(true)
+        setTotalApples(result.totalApples || 0)
+        if (result.viewType === "students") {
+          setData(result.students)
+        } else {
+          setData(result.assistants)
+        }
+      } else {
+        setIsAdmin(false)
+        setData(result)
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load data",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePayRewards = async () => {
+    if (!window.confirm("Are you sure you want to reset all assistant scores to zero? This action cannot be undone.")) {
+      return
     }
 
-    fetchData()
-  }, [decodedName, role, toast, router])
+    setPaying(true)
+    try {
+      const userId = sessionStorage.getItem("userId")
+      const response = await fetch("/api/assistants/pay-rewards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to pay rewards",
+          variant: "destructive",
+        })
+        return
+      }
+
+      toast({
+        title: "Success",
+        description: "All assistant scores have been reset to zero",
+      })
+
+      // Refresh data
+      fetchData()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to pay rewards",
+        variant: "destructive",
+      })
+    } finally {
+      setPaying(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -118,47 +178,98 @@ export default function Dashboard({ params }: { params: { name: string } }) {
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-500 mb-1">
               Admin Dashboard
             </h1>
-            <p className="text-sm text-slate-300">All Assistants Overview</p>
+            <p className="text-sm text-slate-300">
+              {viewType === "assistants" ? "All Assistants Overview" : "All Students Overview"}
+            </p>
           </div>
 
-          {/* Assistants Grid */}
+          <div className="flex gap-2 mb-6 justify-center">
+            <Button
+              onClick={() => setViewType("assistants")}
+              className={`${
+                viewType === "assistants"
+                  ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Assistants
+            </Button>
+            <Button
+              onClick={() => setViewType("students")}
+              className={`${
+                viewType === "students"
+                  ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white"
+                  : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Students
+            </Button>
+          </div>
+
+          <Card className="mb-6 border-emerald-500/50 bg-slate-800/50">
+            <CardHeader>
+              <CardTitle className="text-emerald-400">
+                Total {viewType === "assistants" ? "Assistant" : "Student"} Apples
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-4xl font-bold text-emerald-400">{totalApples}</p>
+            </CardContent>
+          </Card>
+
+          {viewType === "assistants" && (
+            <div className="mb-6">
+              <Button
+                onClick={handlePayRewards}
+                disabled={paying}
+                className="w-full bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-semibold"
+              >
+                {paying ? "Processing..." : "Pay Rewards (Reset All Scores)"}
+              </Button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {data.map((assistant) => (
+            {data.map((item) => (
               <Card
-                key={assistant.id}
+                key={item.id}
                 className="border-slate-700 bg-slate-800/50 hover:border-emerald-500/50 transition-colors"
               >
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-emerald-400 text-lg">{assistant.name}</CardTitle>
-                  <CardDescription className="text-slate-400 text-xs">ID: {assistant.barcode}</CardDescription>
+                  <CardTitle className="text-emerald-400 text-lg">{item.name}</CardTitle>
+                  <CardDescription className="text-slate-400 text-xs">ID: {item.barcode}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-300 text-sm">Total Apples:</span>
-                    <span className="text-emerald-400 font-bold text-lg">{assistant.apples}</span>
+                    <span className="text-emerald-400 font-bold text-lg">{item.apples}</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-slate-700/50 p-2 rounded">
-                      <p className="text-xs text-slate-400">Attendance</p>
-                      <p className="text-lg font-bold text-blue-400">{assistant.attendanceCount}</p>
-                    </div>
-                    <div className="bg-slate-700/50 p-2 rounded">
-                      <p className="text-xs text-slate-400">Bonuses</p>
-                      <p className="text-lg font-bold text-orange-400">{assistant.bonusCount}</p>
-                    </div>
-                  </div>
-                  {assistant.loyaltyHistory.length > 0 && (
-                    <div className="bg-slate-700/30 p-2 rounded text-xs text-slate-300">
-                      <p className="font-semibold mb-1">Recent Bonuses:</p>
-                      <div className="space-y-1">
-                        {assistant.loyaltyHistory.slice(0, 3).map((history, idx) => (
-                          <div key={idx} className="flex justify-between">
-                            <span>Week {history.week}:</span>
-                            <span className="text-orange-400">+{history.bonus_apples}</span>
-                          </div>
-                        ))}
+                  {viewType === "assistants" && "attendanceCount" in item && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-slate-700/50 p-2 rounded">
+                          <p className="text-xs text-slate-400">Attendance</p>
+                          <p className="text-lg font-bold text-blue-400">{item.attendanceCount}</p>
+                        </div>
+                        <div className="bg-slate-700/50 p-2 rounded">
+                          <p className="text-xs text-slate-400">Bonuses</p>
+                          <p className="text-lg font-bold text-orange-400">{item.bonusCount}</p>
+                        </div>
                       </div>
-                    </div>
+                      {item.loyaltyHistory.length > 0 && (
+                        <div className="bg-slate-700/30 p-2 rounded text-xs text-slate-300">
+                          <p className="font-semibold mb-1">Recent Bonuses:</p>
+                          <div className="space-y-1">
+                            {item.loyaltyHistory.slice(0, 3).map((history, idx) => (
+                              <div key={idx} className="flex justify-between">
+                                <span>Week {history.week}:</span>
+                                <span className="text-orange-400">+{history.bonus_apples}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -168,7 +279,9 @@ export default function Dashboard({ params }: { params: { name: string } }) {
           {data.length === 0 && (
             <Card className="border-slate-700 bg-slate-800/50">
               <CardContent className="pt-6">
-                <p className="text-center text-slate-300">No assistants found</p>
+                <p className="text-center text-slate-300">
+                  No {viewType === "assistants" ? "assistants" : "students"} found
+                </p>
               </CardContent>
             </Card>
           )}
@@ -284,7 +397,7 @@ export default function Dashboard({ params }: { params: { name: string } }) {
             <CardTitle className="text-orange-400">Loyalty Bonus Info</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-300">
-            <p className="mb-2">Attend 3+ times in the same week to earn a 50 apple bonus!</p>
+            <p className="mb-2">Attend 4+ times in the same week to earn a 50 apple bonus!</p>
             <p className="text-xs text-slate-400">Bonuses earned: {weeklyBonusCount}</p>
           </CardContent>
         </Card>

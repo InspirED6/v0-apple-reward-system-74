@@ -5,48 +5,73 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
   try {
     const name = decodeURIComponent(params.name)
     const role = request.nextUrl.searchParams.get("role") || "admin"
+    const viewType = request.nextUrl.searchParams.get("viewType") || "assistants"
 
     if (role === "admin") {
-      const { data: assistants, error } = await supabase
-        .from("users")
-        .select("id, name, barcode, apples, role")
-        .eq("role", "assistant")
-        .order("apples", { ascending: false })
+      if (viewType === "students") {
+        const { data: students, error } = await supabase
+          .from("students")
+          .select("id, name, barcode, apples")
+          .order("apples", { ascending: false })
 
-      if (error) {
-        return NextResponse.json({ message: "Failed to fetch assistants" }, { status: 500 })
+        if (error) {
+          return NextResponse.json({ message: "Failed to fetch students" }, { status: 500 })
+        }
+
+        const totalStudentApples = (students || []).reduce((sum, student) => sum + (student.apples || 0), 0)
+
+        return NextResponse.json({
+          isAdmin: true,
+          viewType: "students",
+          students: students || [],
+          totalApples: totalStudentApples,
+        })
+      } else {
+        const { data: assistants, error } = await supabase
+          .from("users")
+          .select("id, name, barcode, apples, role")
+          .eq("role", "assistant")
+          .order("apples", { ascending: false })
+
+        if (error) {
+          return NextResponse.json({ message: "Failed to fetch assistants" }, { status: 500 })
+        }
+
+        // Fetch attendance and loyalty data for each assistant
+        const assistantsWithData = await Promise.all(
+          (assistants || []).map(async (assistant) => {
+            const { data: attendance } = await supabase
+              .from("attendance")
+              .select("attendance_date")
+              .eq("user_id", assistant.id)
+
+            const { data: loyaltyHistory } = await supabase
+              .from("loyalty_history")
+              .select("week, bonus_apples")
+              .eq("user_id", assistant.id)
+
+            return {
+              id: assistant.id,
+              name: assistant.name,
+              barcode: assistant.barcode,
+              apples: assistant.apples,
+              role: assistant.role,
+              attendanceCount: attendance?.length || 0,
+              bonusCount: loyaltyHistory?.length || 0,
+              loyaltyHistory: loyaltyHistory || [],
+            }
+          }),
+        )
+
+        const totalAssistantApples = assistantsWithData.reduce((sum, assistant) => sum + (assistant.apples || 0), 0)
+
+        return NextResponse.json({
+          isAdmin: true,
+          viewType: "assistants",
+          assistants: assistantsWithData,
+          totalApples: totalAssistantApples,
+        })
       }
-
-      // Fetch attendance and loyalty data for each assistant
-      const assistantsWithData = await Promise.all(
-        (assistants || []).map(async (assistant) => {
-          const { data: attendance } = await supabase
-            .from("attendance")
-            .select("attendance_date")
-            .eq("user_id", assistant.id)
-
-          const { data: loyaltyHistory } = await supabase
-            .from("loyalty_history")
-            .select("week, bonus_apples")
-            .eq("user_id", assistant.id)
-
-          return {
-            id: assistant.id,
-            name: assistant.name,
-            barcode: assistant.barcode,
-            apples: assistant.apples,
-            role: assistant.role,
-            attendanceCount: attendance?.length || 0,
-            bonusCount: loyaltyHistory?.length || 0,
-            loyaltyHistory: loyaltyHistory || [],
-          }
-        }),
-      )
-
-      return NextResponse.json({
-        isAdmin: true,
-        assistants: assistantsWithData,
-      })
     }
 
     const { data: user, error } = await supabase
