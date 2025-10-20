@@ -174,4 +174,4 @@ For issues with:
 - **Next.js**: https://nextjs.org/docs
 \`\`\`
 
-```json file="" isHidden
+\`\`\`json file="" isHidden

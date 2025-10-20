@@ -7,8 +7,14 @@ export default function Home() {
   const router = useRouter()
 
   useEffect(() => {
-    // Redirect to login page
-    router.push("/login")
+    const userId = sessionStorage.getItem("userId")
+    const userName = sessionStorage.getItem("userName")
+
+    if (userId && userName) {
+      router.push("/scanner")
+    } else {
+      router.push("/login")
+    }
   }, [router])
 
   return (
