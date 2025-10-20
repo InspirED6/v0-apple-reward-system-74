@@ -30,24 +30,38 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     let finalApples = newApples
     let loyaltyAdded = 0
 
-    if (newSessions >= 4 && currentSessions < 4) {
-      const { data: existingBonus } = await supabase
-        .from("loyalty_history")
-        .select("id")
-        .eq("user_id", assistantId)
-        .eq("bonus_type", "session_4")
-        .single()
+    if (newSessions >= 4) {
+      const currentBonusCount = Math.floor(currentSessions / 4)
+      const newBonusCount = Math.floor(newSessions / 4)
 
-      if (!existingBonus) {
-        finalApples = newApples + 50
-        loyaltyAdded = 50
+      // Check if we've reached a new bonus milestone
+      if (newBonusCount > currentBonusCount) {
+        const bonusesToAdd = newBonusCount - currentBonusCount
 
-        await supabase.from("loyalty_history").insert({
-          user_id: assistantId,
-          bonus_type: "session_4",
-          bonus_apples: 50,
-          created_at: new Date().toISOString(),
-        })
+        for (let i = 0; i < bonusesToAdd; i++) {
+          const bonusLevel = currentBonusCount + i + 1
+          const bonusType = `session_${bonusLevel * 4}`
+
+          // Check if this specific bonus already exists
+          const { data: existingBonus } = await supabase
+            .from("loyalty_history")
+            .select("id")
+            .eq("user_id", assistantId)
+            .eq("bonus_type", bonusType)
+            .single()
+
+          if (!existingBonus) {
+            finalApples += 50
+            loyaltyAdded += 50
+
+            await supabase.from("loyalty_history").insert({
+              user_id: assistantId,
+              bonus_type: bonusType,
+              bonus_apples: 50,
+              created_at: new Date().toISOString(),
+            })
+          }
+        }
       }
     }
 
