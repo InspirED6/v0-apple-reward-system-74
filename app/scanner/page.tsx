@@ -385,7 +385,7 @@ export default function ScannerPage() {
 
         {/* Navigation */}
         <div className="flex gap-2">
-          <Link href={`/dashboard/${userName}`} className="flex-1">
+          <Link href={`/dashboard/${userName}?role=${userRole}`} className="flex-1">
             <Button
               variant="outline"
               className="w-full border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"

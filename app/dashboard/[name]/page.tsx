@@ -43,7 +43,7 @@ export default function Dashboard({ params }: { params: { name: string } }) {
   const { toast } = useToast()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const role = searchParams.get("role") || "admin"
+  const userRole = sessionStorage.getItem("userRole") || "assistant"
   const decodedName = decodeURIComponent(params.name)
 
   useEffect(() => {
@@ -54,12 +54,12 @@ export default function Dashboard({ params }: { params: { name: string } }) {
     }
 
     fetchData()
-  }, [decodedName, role, viewType, router])
+  }, [decodedName, userRole, viewType, router])
 
   const fetchData = async () => {
     try {
       const response = await fetch(
-        `/api/dashboard/${encodeURIComponent(decodedName)}?role=${role}&viewType=${viewType}`,
+        `/api/dashboard/${encodeURIComponent(decodedName)}?role=${userRole}&viewType=${viewType}`,
       )
       const result = await response.json()
 
