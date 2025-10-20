@@ -129,8 +129,8 @@ export default function ScannerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           barcode: barcode.trim(),
-          scannerName: userName,
-          scannerRole: userRole,
+          userId: sessionStorage.getItem("userId"),
+          userRole: userRole,
         }),
       })
 
