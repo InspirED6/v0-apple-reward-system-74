@@ -90,12 +90,15 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
 
+    const bonusCount = loyaltyHistory?.length || 0
+
     return NextResponse.json({
       isAdmin: false,
       name: user.name,
       barcode: user.barcode,
       apples: user.apples,
       sessions: sessions,
+      bonusCount: bonusCount,
       loyaltyHistory: loyaltyHistory || [],
     })
   } catch (error) {
