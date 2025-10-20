@@ -16,6 +16,8 @@ interface ScanResult {
   type?: string
   name?: string
   apples?: number
+  studentId?: string
+  assistantId?: string
 }
 
 export default function ScannerPage() {
@@ -26,6 +28,7 @@ export default function ScannerPage() {
   const [userRole, setUserRole] = useState("")
   const [cameraActive, setCameraActive] = useState(false)
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
+  const [applesLoading, setApplesLoading] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -161,6 +164,54 @@ export default function ScannerPage() {
     }
   }
 
+  const handleAddApples = async (amount: number) => {
+    if (!result) return
+
+    setApplesLoading(true)
+    try {
+      const endpoint =
+        result.type === "student"
+          ? `/api/students/${result.studentId}/add-apples`
+          : `/api/assistants/${result.assistantId}/add-apples`
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apples: amount,
+          adminId: sessionStorage.getItem("userId"),
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: `${amount > 0 ? "Added" : "Subtracted"} ${Math.abs(amount)} apples`,
+        })
+        setResult({
+          ...result,
+          apples: data.apples,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: data.message,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update apples",
+        variant: "destructive",
+      })
+    } finally {
+      setApplesLoading(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
       <div className="max-w-2xl mx-auto pt-4">
@@ -254,16 +305,80 @@ export default function ScannerPage() {
               result.success ? "border-green-500 bg-green-500/10" : "border-red-500 bg-red-500/10"
             }`}
           >
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 space-y-4">
               <p className={`text-center font-semibold ${result.success ? "text-green-400" : "text-red-400"}`}>
                 {result.message}
               </p>
               {result.name && (
-                <p className="text-center text-slate-300 mt-2">
+                <p className="text-center text-slate-300">
                   {result.name} {result.type && `(${result.type})`}
                 </p>
               )}
-              {result.apples && <p className="text-center text-emerald-400 font-bold mt-2">+{result.apples} apples</p>}
+              {result.apples !== undefined && (
+                <p className="text-center text-emerald-400 font-bold">🍎 {result.apples} apples</p>
+              )}
+
+              {(result.type === "student" || result.type === "assistant") && (
+                <div className="space-y-3 pt-4 border-t border-slate-600">
+                  {result.type === "student" && (
+                    <>
+                      <p className="text-sm text-slate-300 font-semibold">Add Apples:</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          onClick={() => handleAddApples(1)}
+                          disabled={applesLoading}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          +1 Apple
+                        </Button>
+                        <Button
+                          onClick={() => handleAddApples(5)}
+                          disabled={applesLoading}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          +5 Apples
+                        </Button>
+                        <Button
+                          onClick={() => handleAddApples(20)}
+                          disabled={applesLoading}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          +20 Apples
+                        </Button>
+                        <Button
+                          onClick={() => handleAddApples(-10)}
+                          disabled={applesLoading}
+                          className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                          -10 Apples
+                        </Button>
+                      </div>
+                    </>
+                  )}
+
+                  {result.type === "assistant" && (
+                    <>
+                      <p className="text-sm text-slate-300 font-semibold">Manage Apples:</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          onClick={() => handleAddApples(150)}
+                          disabled={applesLoading}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                        >
+                          ✓ Attend (+150)
+                        </Button>
+                        <Button
+                          onClick={() => handleAddApples(-10)}
+                          disabled={applesLoading}
+                          className="bg-red-600 hover:bg-red-700 text-white"
+                        >
+                          - Subtract
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

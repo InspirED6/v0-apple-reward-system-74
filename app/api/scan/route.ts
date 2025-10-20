@@ -100,9 +100,27 @@ export async function POST(request: NextRequest) {
           apples: student.apples,
           studentId: student.id,
         })
+      } else if (isAssistant) {
+        const { data: assistant } = await supabase
+          .from("users")
+          .select("id, name, apples")
+          .eq("barcode", barcode)
+          .eq("role", "assistant")
+          .single()
+
+        if (!assistant) {
+          return NextResponse.json({ message: "Assistant not found" }, { status: 404 })
+        }
+
+        return NextResponse.json({
+          type: "assistant",
+          name: assistant.name,
+          apples: assistant.apples,
+          assistantId: assistant.id,
+        })
       } else {
         return NextResponse.json(
-          { message: "Admins can scan their own attendance (2) or student barcodes (1)" },
+          { message: "Admins can scan their own attendance (2), student barcodes (1), or assistant barcodes (3)" },
           { status: 403 },
         )
       }
