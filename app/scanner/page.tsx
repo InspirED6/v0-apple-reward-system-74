@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -27,8 +27,11 @@ export default function ScannerPage() {
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState("")
   const [cameraActive, setCameraActive] = useState(false)
-  const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -50,65 +53,95 @@ export default function ScannerPage() {
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
       })
-      setVideoStream(stream)
-      setCameraActive(true)
 
-      const video = document.getElementById("camera-video") as HTMLVideoElement
-      if (video) {
-        video.srcObject = stream
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch((err) => {
+          console.error("[v0] Video play error:", err)
+          toast({
+            title: "Video Error",
+            description: "Failed to play video stream",
+            variant: "destructive",
+          })
+        })
       }
+      setCameraActive(true)
+      startBarcodeDetection()
     } catch (error) {
+      console.error("[v0] Camera access error:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unable to access camera. Please check permissions."
       toast({
         title: "Camera Error",
-        description: "Unable to access camera. Please check permissions.",
+        description: errorMessage,
         variant: "destructive",
       })
     }
   }
 
-  const stopCamera = () => {
-    if (videoStream) {
-      videoStream.getTracks().forEach((track) => track.stop())
-      setVideoStream(null)
-      setCameraActive(false)
-    }
-  }
+  const startBarcodeDetection = () => {
+    const detectBarcode = () => {
+      if (!videoRef.current || !canvasRef.current || !cameraActive) return
 
-  const captureFromCamera = () => {
-    const video = document.getElementById("camera-video") as HTMLVideoElement
-    const canvas = document.getElementById("camera-canvas") as HTMLCanvasElement
-
-    if (video && canvas) {
+      const video = videoRef.current
+      const canvas = canvasRef.current
       const ctx = canvas.getContext("2d")
-      if (ctx) {
+
+      if (ctx && video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
         ctx.drawImage(video, 0, 0)
 
-        // Simple barcode detection from canvas
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const data = imageData.data
 
-        // Look for dark pixels that might indicate a barcode
-        let barcodeString = ""
+        // Convert to grayscale and detect edges
+        let barcodePattern = ""
         for (let i = 0; i < data.length; i += 4) {
           const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
-          if (brightness < 128) {
-            barcodeString += "1"
-          } else {
-            barcodeString += "0"
-          }
+          barcodePattern += brightness < 128 ? "1" : "0"
         }
 
-        // Extract potential barcode (simplified)
-        const match = barcodeString.match(/1{3,}0{3,}1{3,}/)
-        if (match) {
-          setBarcode(match[0].substring(0, 20))
+        // Look for barcode-like patterns (alternating dark/light bars)
+        const patterns = barcodePattern.match(/(?:1{2,}0{2,}){3,}/g)
+        if (patterns && patterns.length > 0) {
+          const detectedCode = patterns[0].substring(0, 30)
+          if (detectedCode.length > 10 && detectedCode !== barcode) {
+            setBarcode(detectedCode)
+            stopCamera()
+            return
+          }
         }
       }
+
+      animationFrameRef.current = requestAnimationFrame(detectBarcode)
     }
+
+    animationFrameRef.current = requestAnimationFrame(detectBarcode)
+  }
+
+  const stopCamera = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+
+    setCameraActive(false)
   }
 
   const handleScan = async (e: React.FormEvent) => {
@@ -154,6 +187,7 @@ export default function ScannerPage() {
         })
       }
     } catch (error) {
+      console.error("[v0] Scan error:", error)
       toast({
         title: "Error",
         description: "Failed to process scan",
@@ -202,6 +236,7 @@ export default function ScannerPage() {
         })
       }
     } catch (error) {
+      console.error("[v0] Add apples error:", error)
       toast({
         title: "Error",
         description: "Failed to update apples",
@@ -213,198 +248,125 @@ export default function ScannerPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
-      <div className="max-w-2xl mx-auto pt-4">
-        {/* Header */}
-        <div className="text-center mb-6">
-          <div className="flex justify-center gap-2 mb-4">
-            <span className="text-4xl">🍎</span>
-          </div>
-          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-500 mb-1">
-            Barcode Scanner
-          </h1>
-          <p className="text-slate-300 text-sm">
-            Scanning as: {userName} ({userRole})
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 p-4">
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-red-600">🍎 Barcode Scanner</h1>
+          <Link href="/profile">
+            <Button variant="outline">Profile</Button>
+          </Link>
         </div>
+        <p className="text-gray-600 mt-2">
+          Scanning as: <span className="font-semibold">{userName}</span> (
+          <span className="text-red-600">{userRole}</span>)
+        </p>
+      </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Camera Section */}
-        {cameraActive && (
-          <Card className="mb-6 border-slate-700 bg-slate-800/50">
+        <div className="lg:col-span-2">
+          <Card>
             <CardHeader>
-              <CardTitle className="text-slate-100">Camera View</CardTitle>
+              <CardTitle>Camera View</CardTitle>
+              <CardDescription>{cameraActive ? "Camera is active" : "Start camera to scan barcodes"}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <video id="camera-video" autoPlay playsInline className="w-full rounded border border-slate-600" />
-              <canvas id="camera-canvas" className="hidden" />
-              <div className="flex gap-2">
-                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700">
-                  Capture
-                </Button>
-                <Button
-                  onClick={stopCamera}
-                  variant="outline"
-                  className="flex-1 border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"
-                >
-                  Close Camera
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Scanner Input */}
-        <Card className="mb-6 border-slate-700 bg-slate-800/50 backdrop-blur">
-          <CardHeader>
-            <CardTitle className="text-slate-100">Scan Barcode</CardTitle>
-            <CardDescription className="text-slate-400">
-              {userRole === "admin" ? "Scan student or admin barcodes" : "Scan student barcodes only"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleScan} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-200">Barcode</label>
-                <Input
-                  type="text"
-                  placeholder="Enter or scan barcode..."
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  className="bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400"
-                  disabled={loading}
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-semibold"
-                  disabled={loading}
-                >
-                  {loading ? "Scanning..." : "Scan"}
-                </Button>
-                {!cameraActive ? (
-                  <Button
-                    type="button"
-                    onClick={startCamera}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    📷 Camera
+              {cameraActive ? (
+                <div className="space-y-4">
+                  <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+                    <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted />
+                  </div>
+                  <canvas ref={canvasRef} className="hidden" />
+                  <Button onClick={stopCamera} variant="destructive" className="w-full">
+                    Stop Camera
                   </Button>
-                ) : null}
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Result */}
-        {result && (
-          <Card
-            className={`mb-6 border-2 ${
-              result.success ? "border-green-500 bg-green-500/10" : "border-red-500 bg-red-500/10"
-            }`}
-          >
-            <CardContent className="pt-6 space-y-4">
-              <p className={`text-center font-semibold ${result.success ? "text-green-400" : "text-red-400"}`}>
-                {result.message}
-              </p>
-              {result.name && (
-                <p className="text-center text-slate-300">
-                  {result.name} {result.type && `(${result.type})`}
-                </p>
-              )}
-              {result.apples !== undefined && (
-                <p className="text-center text-emerald-400 font-bold">🍎 {result.apples} apples</p>
-              )}
-
-              {(result.type === "student" || result.type === "assistant") && (
-                <div className="space-y-3 pt-4 border-t border-slate-600">
-                  {result.type === "student" && (
-                    <>
-                      <p className="text-sm text-slate-300 font-semibold">Add Apples:</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          onClick={() => handleAddApples(1)}
-                          disabled={applesLoading}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          +1 Apple
-                        </Button>
-                        <Button
-                          onClick={() => handleAddApples(5)}
-                          disabled={applesLoading}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          +5 Apples
-                        </Button>
-                        <Button
-                          onClick={() => handleAddApples(20)}
-                          disabled={applesLoading}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          +20 Apples
-                        </Button>
-                        <Button
-                          onClick={() => handleAddApples(-10)}
-                          disabled={applesLoading}
-                          className="bg-red-600 hover:bg-red-700 text-white"
-                        >
-                          -10 Apples
-                        </Button>
-                      </div>
-                    </>
-                  )}
-
-                  {result.type === "assistant" && (
-                    <>
-                      <p className="text-sm text-slate-300 font-semibold">Manage Apples:</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          onClick={() => handleAddApples(150)}
-                          disabled={applesLoading}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                        >
-                          ✓ Attend (+150)
-                        </Button>
-                        <Button
-                          onClick={() => handleAddApples(-10)}
-                          disabled={applesLoading}
-                          className="bg-red-600 hover:bg-red-700 text-white"
-                        >
-                          - Subtract
-                        </Button>
-                      </div>
-                    </>
-                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-500 mb-4">Camera is not active</p>
+                  <Button onClick={startCamera} className="w-full bg-red-600 hover:bg-red-700">
+                    Start Camera
+                  </Button>
                 </div>
               )}
             </CardContent>
           </Card>
-        )}
+        </div>
 
-        {/* Navigation */}
-        <div className="flex gap-2">
-          <Link href={`/dashboard/${userName}?role=${userRole}`} className="flex-1">
-            <Button
-              variant="outline"
-              className="w-full border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"
-            >
-              View Dashboard
-            </Button>
-          </Link>
-          <Button
-            onClick={() => {
-              sessionStorage.clear()
-              router.push("/login")
-            }}
-            variant="outline"
-            className="flex-1 border-red-600 text-red-400 hover:bg-red-500/10"
-          >
-            Logout
-          </Button>
+        {/* Barcode Input Section */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Barcode Input</CardTitle>
+              <CardDescription>Enter or scan a barcode</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleScan} className="space-y-4">
+                <Input
+                  type="text"
+                  placeholder="Barcode..."
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  autoFocus
+                />
+                <Button type="submit" disabled={loading} className="w-full bg-red-600 hover:bg-red-700">
+                  {loading ? "Scanning..." : "Scan"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Result Section */}
+          {result && (
+            <Card className={result.success ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}>
+              <CardHeader>
+                <CardTitle className={result.success ? "text-green-700" : "text-red-700"}>
+                  {result.success ? "✓ Success" : "✗ Failed"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm">{result.message}</p>
+
+                {result.success && result.type && (
+                  <>
+                    <div className="space-y-2 text-sm">
+                      <p>
+                        <span className="font-semibold">Name:</span> {result.name}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Type:</span> {result.type}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Apples:</span> {result.apples}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        onClick={() => handleAddApples(1)}
+                        disabled={applesLoading}
+                        variant="outline"
+                        className="text-green-600 border-green-600 hover:bg-green-50"
+                      >
+                        +1 Apple
+                      </Button>
+                      <Button
+                        onClick={() => handleAddApples(-1)}
+                        disabled={applesLoading}
+                        variant="outline"
+                        className="text-red-600 border-red-600 hover:bg-red-50"
+                      >
+                        -1 Apple
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
-    </main>
+    </div>
   )
 }
