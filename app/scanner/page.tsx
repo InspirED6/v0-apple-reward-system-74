@@ -28,6 +28,7 @@ export default function ScannerPage() {
   const [userRole, setUserRole] = useState("")
   const [cameraActive, setCameraActive] = useState(false)
   const [applesLoading, setApplesLoading] = useState(false)
+  const [scanStatus, setScanStatus] = useState<"idle" | "scanning" | "detected">("idle")
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -49,6 +50,75 @@ export default function ScannerPage() {
     setUserName(storedName)
     setUserRole(storedRole)
   }, [router])
+
+  const detectBarcodeInImage = (imageData: ImageData): string | null => {
+    const data = imageData.data
+    const width = imageData.width
+    const height = imageData.height
+
+    // Convert to grayscale
+    const grayscale = new Uint8ClampedArray(width * height)
+    for (let i = 0; i < data.length; i += 4) {
+      grayscale[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2])
+    }
+
+    // Apply threshold to create binary image
+    const threshold = 128
+    const binary = new Uint8ClampedArray(width * height)
+    for (let i = 0; i < grayscale.length; i++) {
+      binary[i] = grayscale[i] > threshold ? 255 : 0
+    }
+
+    // Scan for barcode patterns (horizontal lines with alternating bars)
+    let maxBarcodeScore = 0
+    let bestRow = -1
+
+    for (let y = Math.floor(height * 0.2); y < Math.floor(height * 0.8); y++) {
+      let transitions = 0
+      let barCount = 0
+      let currentColor = binary[y * width]
+
+      for (let x = 1; x < width; x++) {
+        if (binary[y * width + x] !== currentColor) {
+          transitions++
+          currentColor = binary[y * width + x]
+          barCount++
+        }
+      }
+
+      // Good barcodes have many transitions (alternating bars)
+      if (transitions > 20 && barCount > 15) {
+        if (transitions > maxBarcodeScore) {
+          maxBarcodeScore = transitions
+          bestRow = y
+        }
+      }
+    }
+
+    // If we found a good barcode row, extract the pattern
+    if (bestRow !== -1 && maxBarcodeScore > 20) {
+      let pattern = ""
+      let currentColor = binary[bestRow * width]
+      let barWidth = 0
+
+      for (let x = 0; x < width; x++) {
+        if (binary[bestRow * width + x] === currentColor) {
+          barWidth++
+        } else {
+          pattern += currentColor === 0 ? "0" : "1"
+          currentColor = binary[bestRow * width + x]
+          barWidth = 1
+        }
+      }
+
+      // Return a simplified barcode representation
+      if (pattern.length > 15) {
+        return pattern.substring(0, 50)
+      }
+    }
+
+    return null
+  }
 
   const startCamera = async () => {
     try {
@@ -74,6 +144,7 @@ export default function ScannerPage() {
         })
       }
       setCameraActive(true)
+      setScanStatus("scanning")
       startBarcodeDetection()
     } catch (error) {
       console.error("[v0] Camera access error:", error)
@@ -87,6 +158,9 @@ export default function ScannerPage() {
   }
 
   const startBarcodeDetection = () => {
+    let lastDetectedCode = ""
+    let detectionCount = 0
+
     const detectBarcode = () => {
       if (!videoRef.current || !canvasRef.current || !cameraActive) return
 
@@ -100,24 +174,23 @@ export default function ScannerPage() {
         ctx.drawImage(video, 0, 0)
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data = imageData.data
+        const detectedCode = detectBarcodeInImage(imageData)
 
-        // Convert to grayscale and detect edges
-        let barcodePattern = ""
-        for (let i = 0; i < data.length; i += 4) {
-          const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
-          barcodePattern += brightness < 128 ? "1" : "0"
-        }
-
-        // Look for barcode-like patterns (alternating dark/light bars)
-        const patterns = barcodePattern.match(/(?:1{2,}0{2,}){3,}/g)
-        if (patterns && patterns.length > 0) {
-          const detectedCode = patterns[0].substring(0, 30)
-          if (detectedCode.length > 10 && detectedCode !== barcode) {
+        if (detectedCode && detectedCode === lastDetectedCode) {
+          detectionCount++
+          if (detectionCount > 5) {
             setBarcode(detectedCode)
+            setScanStatus("detected")
             stopCamera()
+            toast({
+              title: "Barcode Detected",
+              description: "Barcode successfully scanned",
+            })
             return
           }
+        } else {
+          detectionCount = 0
+          lastDetectedCode = detectedCode || ""
         }
       }
 
@@ -142,6 +215,7 @@ export default function ScannerPage() {
     }
 
     setCameraActive(false)
+    setScanStatus("idle")
   }
 
   const handleScan = async (e: React.FormEvent) => {
@@ -269,13 +343,25 @@ export default function ScannerPage() {
           <Card>
             <CardHeader>
               <CardTitle>Camera View</CardTitle>
-              <CardDescription>{cameraActive ? "Camera is active" : "Start camera to scan barcodes"}</CardDescription>
+              <CardDescription>
+                {cameraActive ? (
+                  <span className="flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    {scanStatus === "scanning" ? "Scanning for barcodes..." : "Barcode detected!"}
+                  </span>
+                ) : (
+                  "Start camera to scan barcodes"
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {cameraActive ? (
                 <div className="space-y-4">
                   <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
                     <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg opacity-50"></div>
+                    </div>
                   </div>
                   <canvas ref={canvasRef} className="hidden" />
                   <Button onClick={stopCamera} variant="destructive" className="w-full">
