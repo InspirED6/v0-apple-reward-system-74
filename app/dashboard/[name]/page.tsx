@@ -13,9 +13,9 @@ interface AssistantData {
   barcode: string
   apples: number
   role: string
-  attendanceCount: number
+  sessions: number
   bonusCount: number
-  loyaltyHistory: Array<{ week: string; bonus_apples: number }>
+  loyaltyHistory: Array<{ bonus_type: string; bonus_apples: number }>
 }
 
 interface StudentData {
@@ -29,8 +29,8 @@ interface DashboardData {
   name: string
   barcode: string
   apples: number
-  attendance: Array<{ date: string }>
-  loyaltyHistory: Array<{ week: string; bonus_apples: number }>
+  sessions: number
+  loyaltyHistory: Array<{ bonus_type: string; bonus_apples: number; created_at: string }>
 }
 
 export default function Dashboard({ params }: { params: { name: string } }) {
@@ -125,7 +125,6 @@ export default function Dashboard({ params }: { params: { name: string } }) {
         description: "All assistant scores have been reset to zero",
       })
 
-      // Refresh data
       fetchData()
     } catch (error) {
       toast({
@@ -244,12 +243,12 @@ export default function Dashboard({ params }: { params: { name: string } }) {
                     <span className="text-slate-300 text-sm">Total Apples:</span>
                     <span className="text-emerald-400 font-bold text-lg">{item.apples}</span>
                   </div>
-                  {viewType === "assistants" && "attendanceCount" in item && (
+                  {viewType === "assistants" && "sessions" in item && (
                     <>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="bg-slate-700/50 p-2 rounded">
-                          <p className="text-xs text-slate-400">Attendance</p>
-                          <p className="text-lg font-bold text-blue-400">{item.attendanceCount}</p>
+                          <p className="text-xs text-slate-400">Sessions</p>
+                          <p className="text-lg font-bold text-blue-400">{item.sessions}</p>
                         </div>
                         <div className="bg-slate-700/50 p-2 rounded">
                           <p className="text-xs text-slate-400">Bonuses</p>
@@ -262,7 +261,7 @@ export default function Dashboard({ params }: { params: { name: string } }) {
                           <div className="space-y-1">
                             {item.loyaltyHistory.slice(0, 3).map((history, idx) => (
                               <div key={idx} className="flex justify-between">
-                                <span>Week {history.week}:</span>
+                                <span>{history.bonus_type}:</span>
                                 <span className="text-orange-400">+{history.bonus_apples}</span>
                               </div>
                             ))}
@@ -309,8 +308,8 @@ export default function Dashboard({ params }: { params: { name: string } }) {
   }
 
   const userData = data as DashboardData
-  const attendanceCount = userData.attendance.length
-  const weeklyBonusCount = userData.loyaltyHistory.length
+  const sessions = userData.sessions
+  const bonusCount = userData.loyaltyHistory.length
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
@@ -343,53 +342,24 @@ export default function Dashboard({ params }: { params: { name: string } }) {
         <div className="grid grid-cols-2 gap-4 mb-6">
           <Card className="border-slate-700 bg-slate-800/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-400">Attendance</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-400">Sessions</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold text-emerald-400">{attendanceCount}</p>
-              <p className="text-xs text-slate-400 mt-1">days attended</p>
+              <p className="text-3xl font-bold text-emerald-400">{sessions}</p>
+              <p className="text-xs text-slate-400 mt-1">sessions attended</p>
             </CardContent>
           </Card>
 
           <Card className="border-slate-700 bg-slate-800/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-400">Weekly Bonuses</CardTitle>
+              <CardTitle className="text-sm font-medium text-slate-400">Bonuses</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold text-orange-400">{weeklyBonusCount}</p>
+              <p className="text-3xl font-bold text-orange-400">{bonusCount}</p>
               <p className="text-xs text-slate-400 mt-1">bonuses earned</p>
             </CardContent>
           </Card>
         </div>
-
-        {/* Attendance History */}
-        <Card className="mb-6 border-slate-700 bg-slate-800/50">
-          <CardHeader>
-            <CardTitle className="text-slate-100">Recent Attendance</CardTitle>
-            <CardDescription className="text-slate-400">Last 10 check-ins</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {userData.attendance.length > 0 ? (
-              <div className="space-y-2">
-                {userData.attendance
-                  .slice()
-                  .reverse()
-                  .slice(0, 10)
-                  .map((att, idx) => (
-                    <div
-                      key={idx}
-                      className="flex justify-between items-center p-2 bg-slate-700/50 rounded border border-slate-600"
-                    >
-                      <span className="text-sm text-slate-300">{new Date(att.date).toLocaleDateString()}</span>
-                      <span className="text-sm font-medium text-emerald-400">+150</span>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-400">No attendance records yet</p>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Loyalty Bonus Info */}
         <Card className="mb-6 border-orange-500/50 bg-slate-800/50">
@@ -397,10 +367,38 @@ export default function Dashboard({ params }: { params: { name: string } }) {
             <CardTitle className="text-orange-400">Loyalty Bonus Info</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-300">
-            <p className="mb-2">Attend 4+ times in the same week to earn a 50 apple bonus!</p>
-            <p className="text-xs text-slate-400">Bonuses earned: {weeklyBonusCount}</p>
+            <p className="mb-2">Reach 4 sessions (600 apples) to earn a 50 apple bonus automatically!</p>
+            <p className="text-xs text-slate-400">Current sessions: {sessions} / 4</p>
+            <div className="mt-3 bg-slate-700/50 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-green-500 to-emerald-600 h-full transition-all"
+                style={{ width: `${Math.min((sessions / 4) * 100, 100)}%` }}
+              />
+            </div>
           </CardContent>
         </Card>
+
+        {/* Bonus History */}
+        {userData.loyaltyHistory.length > 0 && (
+          <Card className="mb-6 border-slate-700 bg-slate-800/50">
+            <CardHeader>
+              <CardTitle className="text-slate-100">Bonus History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {userData.loyaltyHistory.map((bonus, idx) => (
+                  <div
+                    key={idx}
+                    className="flex justify-between items-center p-2 bg-slate-700/50 rounded border border-slate-600"
+                  >
+                    <span className="text-sm text-slate-300">{bonus.bonus_type}</span>
+                    <span className="text-sm font-medium text-orange-400">+{bonus.bonus_apples}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex gap-2">
           <Link href="/scanner" className="flex-1">

@@ -37,18 +37,15 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
           return NextResponse.json({ message: "Failed to fetch assistants" }, { status: 500 })
         }
 
-        // Fetch attendance and loyalty data for each assistant
         const assistantsWithData = await Promise.all(
           (assistants || []).map(async (assistant) => {
-            const { data: attendance } = await supabase
-              .from("attendance")
-              .select("attendance_date")
-              .eq("user_id", assistant.id)
-
             const { data: loyaltyHistory } = await supabase
               .from("loyalty_history")
-              .select("week, bonus_apples")
+              .select("bonus_type, bonus_apples")
               .eq("user_id", assistant.id)
+
+            const sessions = Math.floor((assistant.apples || 0) / 150)
+            const bonusCount = loyaltyHistory?.length || 0
 
             return {
               id: assistant.id,
@@ -56,8 +53,8 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
               barcode: assistant.barcode,
               apples: assistant.apples,
               role: assistant.role,
-              attendanceCount: attendance?.length || 0,
-              bonusCount: loyaltyHistory?.length || 0,
+              sessions: sessions,
+              bonusCount: bonusCount,
               loyaltyHistory: loyaltyHistory || [],
             }
           }),
@@ -85,27 +82,20 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
       return NextResponse.json({ message: "User not found" }, { status: 404 })
     }
 
-    const { data: attendance } = await supabase
-      .from("attendance")
-      .select("attendance_date")
-      .eq("user_id", user.id)
-      .order("attendance_date", { ascending: false })
+    const sessions = Math.floor((user.apples || 0) / 150)
 
     const { data: loyaltyHistory } = await supabase
       .from("loyalty_history")
-      .select("week, bonus_apples")
+      .select("bonus_type, bonus_apples, created_at")
       .eq("user_id", user.id)
-      .order("week", { ascending: false })
+      .order("created_at", { ascending: false })
 
     return NextResponse.json({
       isAdmin: false,
       name: user.name,
       barcode: user.barcode,
       apples: user.apples,
-      attendance:
-        attendance?.map((att) => ({
-          date: att.attendance_date,
-        })) || [],
+      sessions: sessions,
       loyaltyHistory: loyaltyHistory || [],
     })
   } catch (error) {

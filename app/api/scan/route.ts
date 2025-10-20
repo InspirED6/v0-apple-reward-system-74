@@ -1,15 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/db"
 
-function getISOWeek(date: Date): string {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-  const dayNum = d.getUTCDay() || 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const weekNum = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
-  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { barcode, userRole, userId } = await request.json()
@@ -25,26 +16,12 @@ export async function POST(request: NextRequest) {
 
     if (userRole === "admin") {
       if (isAdmin) {
-        // Check if already attended today
-        const today = new Date().toDateString()
-        const { data: todayAttendance } = await supabase
-          .from("attendance")
-          .select("id")
-          .eq("user_id", userId)
-          .gte("attendance_date", new Date(today).toISOString())
-          .lt("attendance_date", new Date(new Date(today).getTime() + 86400000).toISOString())
-          .single()
-
-        if (todayAttendance) {
-          return NextResponse.json({ message: "Already attended today", type: "admin" }, { status: 400 })
-        }
-
-        // Add attendance record
-        await supabase.from("attendance").insert({ user_id: userId })
-
         const { data: user } = await supabase.from("users").select("apples").eq("id", userId).single()
 
-        const newApples = (user?.apples || 0) + 150
+        const currentApples = user?.apples || 0
+        const newApples = currentApples + 150
+        const currentSessions = Math.floor(currentApples / 150)
+        const newSessions = Math.floor(newApples / 150)
 
         const { data: updatedUser } = await supabase
           .from("users")
@@ -53,37 +30,25 @@ export async function POST(request: NextRequest) {
           .select("name, apples")
           .single()
 
-        // Check for loyalty bonus (4+ attendances in current week)
-        const currentWeek = getISOWeek(new Date())
-        const weekStart = new Date()
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1)
-
-        const { data: weekAttendances } = await supabase
-          .from("attendance")
-          .select("id")
-          .eq("user_id", userId)
-          .gte("attendance_date", weekStart.toISOString())
-
         let loyaltyAdded = 0
-        if ((weekAttendances?.length || 0) >= 4) {
+        if (newSessions >= 4 && currentSessions < 4) {
           const { data: existingBonus } = await supabase
             .from("loyalty_history")
             .select("id")
             .eq("user_id", userId)
-            .eq("week", currentWeek)
+            .eq("bonus_type", "session_4")
             .single()
 
           if (!existingBonus) {
-            const { data: currentUser } = await supabase.from("users").select("apples").eq("id", userId).single()
-
-            const applesWithBonus = (currentUser?.apples || 0) + 50
+            const applesWithBonus = newApples + 50
 
             await supabase.from("users").update({ apples: applesWithBonus }).eq("id", userId)
 
             await supabase.from("loyalty_history").insert({
               user_id: userId,
-              week: currentWeek,
+              bonus_type: "session_4",
               bonus_apples: 50,
+              created_at: new Date().toISOString(),
             })
             loyaltyAdded = 50
           }
@@ -97,8 +62,9 @@ export async function POST(request: NextRequest) {
           name: finalUser?.name,
           apples: finalUser?.apples,
           applesAdded: 150,
+          sessions: Math.floor((finalUser?.apples || 0) / 150),
           loyaltyAdded: loyaltyAdded > 0 ? loyaltyAdded : undefined,
-          message: `Attendance recorded! +150 apples${loyaltyAdded > 0 ? ` + ${loyaltyAdded} loyalty bonus` : ""}`,
+          message: `Session recorded! +150 apples (Session ${newSessions})${loyaltyAdded > 0 ? ` + ${loyaltyAdded} loyalty bonus` : ""}`,
         })
       } else if (isStudent) {
         const { data: student } = await supabase
