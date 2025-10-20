@@ -21,11 +21,39 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ message: "Assistant not found" }, { status: 404 })
     }
 
-    const newApples = Math.max(0, (assistant.apples || 0) + apples)
+    const currentApples = assistant.apples || 0
+    const newApples = Math.max(0, currentApples + apples)
+
+    const currentSessions = Math.floor(currentApples / 150)
+    const newSessions = Math.floor(newApples / 150)
+
+    let finalApples = newApples
+    let loyaltyAdded = 0
+
+    if (newSessions >= 4 && currentSessions < 4) {
+      const { data: existingBonus } = await supabase
+        .from("loyalty_history")
+        .select("id")
+        .eq("user_id", assistantId)
+        .eq("bonus_type", "session_4")
+        .single()
+
+      if (!existingBonus) {
+        finalApples = newApples + 50
+        loyaltyAdded = 50
+
+        await supabase.from("loyalty_history").insert({
+          user_id: assistantId,
+          bonus_type: "session_4",
+          bonus_apples: 50,
+          created_at: new Date().toISOString(),
+        })
+      }
+    }
 
     const { data: updatedAssistant } = await supabase
       .from("users")
-      .update({ apples: newApples })
+      .update({ apples: finalApples })
       .eq("id", assistantId)
       .select()
       .single()
@@ -43,7 +71,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       name: updatedAssistant?.name,
       apples: updatedAssistant?.apples,
       applesAdded: apples,
-      message: `${apples > 0 ? "Added" : "Subtracted"} ${Math.abs(apples)} apples`,
+      sessions: Math.floor((updatedAssistant?.apples || 0) / 150),
+      loyaltyAdded: loyaltyAdded > 0 ? loyaltyAdded : undefined,
+      message: `${apples > 0 ? "Added" : "Subtracted"} ${Math.abs(apples)} apples (Session ${newSessions})${loyaltyAdded > 0 ? ` + ${loyaltyAdded} loyalty bonus!` : ""}`,
     })
   } catch (error) {
     console.error("[v0] Add assistant apples error:", error)
