@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import Quagga from "quagga"
+import Quagga from "quagga/dist/quagga.min.js"
 
 interface ScanResult {
   success: boolean
