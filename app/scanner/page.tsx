@@ -57,10 +57,43 @@ export default function ScannerPage() {
     }
   }, [router, videoStream])
 
+  // Add effect to handle video element updates
+  useEffect(() => {
+    const video = videoRef.current
+    if (video && videoStream) {
+      video.srcObject = videoStream
+      
+      const handleLoadedMetadata = () => {
+        video.play().catch((error) => {
+          console.error("Video play error:", error)
+        })
+      }
+      
+      const handleCanPlay = () => {
+        video.play().catch((error) => {
+          console.error("Video play error:", error)
+        })
+      }
+      
+      video.addEventListener('loadedmetadata', handleLoadedMetadata)
+      video.addEventListener('canplay', handleCanPlay)
+      
+      return () => {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+        video.removeEventListener('canplay', handleCanPlay)
+      }
+    }
+  }, [videoStream])
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { 
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
       })
       setVideoStream(stream)
       setCameraActive(true)
@@ -69,7 +102,22 @@ export default function ScannerPage() {
       const video = videoRef.current
       if (video) {
         video.srcObject = stream
-        video.play()
+        
+        // Add event listeners to ensure video plays
+        video.onloadedmetadata = () => {
+          video.play().catch(console.error)
+        }
+        
+        video.oncanplay = () => {
+          video.play().catch(console.error)
+        }
+        
+        // Force play after a short delay
+        setTimeout(() => {
+          if (video.paused) {
+            video.play().catch(console.error)
+          }
+        }, 100)
       }
 
       toast({
@@ -80,7 +128,7 @@ export default function ScannerPage() {
       console.error("Camera error:", error)
       toast({
         title: "Camera Error",
-        description: "Unable to access camera. Please check permissions.",
+        description: "Unable to access camera. Please check permissions, ensure HTTPS is enabled, and try refreshing the page.",
         variant: "destructive",
       })
     }
@@ -242,7 +290,26 @@ export default function ScannerPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="relative">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-64 rounded border border-slate-600 object-cover" />
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  muted
+                  className="w-full h-64 rounded border border-slate-600 object-cover bg-black" 
+                  style={{ transform: 'scaleX(-1)' }}
+                  onError={(e) => {
+                    console.error("Video error:", e)
+                    toast({
+                      title: "Video Error",
+                      description: "Failed to load video stream. Try restarting the camera.",
+                      variant: "destructive",
+                    })
+                  }}
+                  onLoadStart={() => console.log("Video load started")}
+                  onLoadedMetadata={() => console.log("Video metadata loaded")}
+                  onCanPlay={() => console.log("Video can play")}
+                  onPlaying={() => console.log("Video is playing")}
+                />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="bg-black/20 rounded-lg p-4">
                     <div className="text-white text-sm text-center">
@@ -263,6 +330,13 @@ export default function ScannerPage() {
                 >
                   Close Camera
                 </Button>
+              </div>
+              <div className="text-xs text-slate-400 space-y-1">
+                <div className="font-semibold">Troubleshooting:</div>
+                <div>• If camera shows black screen, try refreshing the page</div>
+                <div>• Ensure camera permissions are granted</div>
+                <div>• Make sure you're using HTTPS (required for camera access)</div>
+                <div>• Try using a different browser or device</div>
               </div>
             </CardContent>
           </Card>
@@ -341,7 +415,15 @@ export default function ScannerPage() {
                   >
                     📷 Use Camera
                   </Button>
-                ) : null}
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={startCamera}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    🔄 Restart Camera
+                  </Button>
+                )}
               </div>
             </form>
           </CardContent>
