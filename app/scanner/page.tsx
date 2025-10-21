@@ -61,6 +61,34 @@ export default function ScannerPage() {
     }
   }, [videoStream])
 
+  // Add effect to handle video element updates
+  useEffect(() => {
+    const video = videoRef.current
+    if (video && videoStream) {
+      video.srcObject = videoStream
+      
+      const handleLoadedMetadata = () => {
+        video.play().catch((error) => {
+          console.error("Video play error:", error)
+        })
+      }
+      
+      const handleCanPlay = () => {
+        video.play().catch((error) => {
+          console.error("Video play error:", error)
+        })
+      }
+      
+      video.addEventListener('loadedmetadata', handleLoadedMetadata)
+      video.addEventListener('canplay', handleCanPlay)
+      
+      return () => {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+        video.removeEventListener('canplay', handleCanPlay)
+      }
+    }
+  }, [videoStream])
+
   const startCamera = async () => {
     setCameraLoading(true)
     try {
@@ -436,6 +464,13 @@ export default function ScannerPage() {
                 >
                   Close Camera
                 </Button>
+              </div>
+              <div className="text-xs text-slate-400 space-y-1">
+                <div className="font-semibold">Troubleshooting:</div>
+                <div>• If camera shows black screen, try refreshing the page</div>
+                <div>• Ensure camera permissions are granted</div>
+                <div>• Make sure you're using HTTPS (required for camera access)</div>
+                <div>• Try using a different browser or device</div>
               </div>
             </CardContent>
           </Card>
