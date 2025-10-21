@@ -31,6 +31,8 @@ export default function ScannerPage() {
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
+  const [cameraLoading, setCameraLoading] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -48,14 +50,16 @@ export default function ScannerPage() {
 
     setUserName(storedName)
     setUserRole(storedRole)
+  }, [router])
 
-    // Cleanup on unmount
+  // Cleanup video stream on unmount
+  useEffect(() => {
     return () => {
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
     }
-  }, [router, videoStream])
+  }, [videoStream])
 
   // Add effect to handle video element updates
   useEffect(() => {
@@ -86,39 +90,99 @@ export default function ScannerPage() {
   }, [videoStream])
 
   const startCamera = async () => {
+    setCameraLoading(true)
     try {
+      // Check if getUserMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera not supported on this device")
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 640, min: 320 },
+          height: { ideal: 480, min: 240 }
         },
         audio: false
       })
+      
       setVideoStream(stream)
       setCameraActive(true)
       setIsScanning(false)
+      setCameraLoading(false)
 
       const video = videoRef.current
       if (video) {
         video.srcObject = stream
+        video.muted = true
+        video.playsInline = true
+        video.setAttribute('playsinline', 'true')
+        video.setAttribute('webkit-playsinline', 'true')
+        video.setAttribute('autoplay', 'true')
         
-        // Add event listeners to ensure video plays
-        video.onloadedmetadata = () => {
+        // Add event listeners for debugging
+        video.addEventListener('loadedmetadata', () => {
+          console.log('Video metadata loaded:', video.videoWidth, 'x', video.videoHeight)
+          // Force video to play after metadata is loaded
           video.play().catch(console.error)
-        }
+        })
         
-        video.oncanplay = () => {
+        video.addEventListener('canplay', () => {
+          console.log('Video can play')
+          setVideoReady(true)
           video.play().catch(console.error)
-        }
+        })
         
-        // Force play after a short delay
+        video.addEventListener('loadeddata', () => {
+          console.log('Video data loaded')
+          video.play().catch(console.error)
+        })
+        
+        // Ensure video plays immediately
+        video.play().catch((playError) => {
+          console.error('Video play error:', playError)
+          toast({
+            title: "Video Playback Error",
+            description: "Camera started but video may not be visible. Try refreshing the page.",
+            variant: "destructive",
+          })
+        })
+
+        // Force play after a short delay to ensure video is ready
         setTimeout(() => {
           if (video.paused) {
             video.play().catch(console.error)
           }
-        }, 100)
+        }, 500)
       }
+
+        // Check if video is actually playing
+        setTimeout(() => {
+          const video = videoRef.current
+          if (video) {
+            console.log('Video state:', {
+              paused: video.paused,
+              readyState: video.readyState,
+              videoWidth: video.videoWidth,
+              videoHeight: video.videoHeight,
+              srcObject: !!video.srcObject
+            })
+            
+            if (video.paused || video.readyState < 2) {
+              console.log('Video not ready, attempting to play again')
+              video.play().catch(console.error)
+            }
+            
+            // If video still not ready after 2 seconds, show warning
+            if (!videoReady && (video.paused || video.readyState < 2)) {
+              toast({
+                title: "Camera Display Issue",
+                description: "Camera is active but video may not be visible. You can still use manual entry below.",
+                variant: "destructive",
+              })
+            }
+          }
+        }, 2000)
 
       toast({
         title: "Camera Ready",
@@ -126,9 +190,22 @@ export default function ScannerPage() {
       })
     } catch (error) {
       console.error("Camera error:", error)
+      setCameraLoading(false)
+      
+      let errorMessage = "Unable to access camera. Please check permissions."
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          errorMessage = "Camera permission denied. Please allow camera access and try again."
+        } else if (error.name === 'NotFoundError') {
+          errorMessage = "No camera found on this device."
+        } else if (error.name === 'NotSupportedError') {
+          errorMessage = "Camera not supported on this device or browser."
+        }
+      }
+      
       toast({
         title: "Camera Error",
-        description: "Unable to access camera. Please check permissions, ensure HTTPS is enabled, and try refreshing the page.",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -140,6 +217,7 @@ export default function ScannerPage() {
       setVideoStream(null)
       setCameraActive(false)
       setIsScanning(false)
+      setVideoReady(false)
     }
   }
 
@@ -280,53 +358,109 @@ export default function ScannerPage() {
         </div>
 
         {/* Camera Section */}
-        {cameraActive && (
+        {(cameraActive || cameraLoading) && (
           <Card className="mb-6 border-slate-700 bg-slate-800/50">
             <CardHeader>
               <CardTitle className="text-slate-100">Camera View</CardTitle>
               <CardDescription className="text-slate-400">
-                {isScanning ? "Point camera at barcode to scan automatically" : "Camera ready"}
+                {cameraLoading ? "Starting camera..." : isScanning ? "Point camera at barcode to scan automatically" : "Camera ready"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="relative">
-                <video 
-                  ref={videoRef} 
-                  autoPlay 
-                  playsInline 
-                  muted
-                  className="w-full h-64 rounded border border-slate-600 object-cover bg-black" 
-                  style={{ transform: 'scaleX(-1)' }}
-                  onError={(e) => {
-                    console.error("Video error:", e)
-                    toast({
-                      title: "Video Error",
-                      description: "Failed to load video stream. Try restarting the camera.",
-                      variant: "destructive",
-                    })
-                  }}
-                  onLoadStart={() => console.log("Video load started")}
-                  onLoadedMetadata={() => console.log("Video metadata loaded")}
-                  onCanPlay={() => console.log("Video can play")}
-                  onPlaying={() => console.log("Video is playing")}
-                />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-black/20 rounded-lg p-4">
-                    <div className="text-white text-sm text-center">
-                      <div className="mb-2">📷 Camera View</div>
-                      <div className="text-xs">Manually enter barcode below</div>
+              <div className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
+                {cameraLoading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                      <div className="text-white text-sm">Starting camera...</div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <video 
+                      ref={videoRef} 
+                      autoPlay 
+                      playsInline 
+                      muted
+                      className="w-full h-64 object-cover"
+                      style={{ 
+                        transform: 'scaleX(-1)',
+                        backgroundColor: '#000',
+                        minHeight: '256px'
+                      }}
+                      onLoadStart={() => console.log('Video load started')}
+                      onLoadedData={() => console.log('Video data loaded')}
+                      onError={(e) => {
+                        console.error('Video error:', e)
+                        toast({
+                          title: "Video Error",
+                          description: "Failed to load camera video. Please try refreshing the camera.",
+                          variant: "destructive",
+                        })
+                      }}
+                      onCanPlay={() => {
+                        console.log('Video can play')
+                        videoRef.current?.play().catch(console.error)
+                      }}
+                      onPlay={() => {
+                        console.log('Video playing')
+                        setVideoReady(true)
+                      }}
+                      onPause={() => console.log('Video paused')}
+                      onStalled={() => console.log('Video stalled')}
+                    />
+                    {/* Camera status indicator */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className={`rounded-lg p-4 border ${videoReady ? 'bg-green-500/20 border-green-400' : 'bg-black/50 border-white/20'}`}>
+                        <div className="text-white text-sm text-center">
+                          <div className="mb-2">📷 Camera View</div>
+                          <div className="text-xs">Manually enter barcode below</div>
+                          {videoReady ? (
+                            <div className="text-xs text-green-300 mt-1">
+                              ✓ Camera active
+                            </div>
+                          ) : (
+                            <div className="text-xs text-yellow-300 mt-1">
+                              Loading camera...
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Scanning overlay */}
+                    <div className="absolute inset-0 border-2 border-green-400 rounded-lg pointer-events-none">
+                      <div className="absolute top-2 left-2 w-6 h-6 border-t-2 border-l-2 border-green-400"></div>
+                      <div className="absolute top-2 right-2 w-6 h-6 border-t-2 border-r-2 border-green-400"></div>
+                      <div className="absolute bottom-2 left-2 w-6 h-6 border-b-2 border-l-2 border-green-400"></div>
+                      <div className="absolute bottom-2 right-2 w-6 h-6 border-b-2 border-r-2 border-green-400"></div>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
-                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700">
+                <Button 
+                  onClick={captureFromCamera} 
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  disabled={cameraLoading}
+                >
                   📷 Camera Help
+                </Button>
+                <Button
+                  onClick={() => {
+                    stopCamera()
+                    setTimeout(() => startCamera(), 100)
+                  }}
+                  variant="outline"
+                  className="flex-1 border-yellow-600 text-yellow-400 hover:bg-yellow-500/10"
+                  disabled={cameraLoading}
+                >
+                  🔄 Refresh Camera
                 </Button>
                 <Button
                   onClick={stopCamera}
                   variant="outline"
                   className="flex-1 border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"
+                  disabled={cameraLoading}
                 >
                   Close Camera
                 </Button>
@@ -407,7 +541,7 @@ export default function ScannerPage() {
                 >
                   {loading ? "Processing..." : "Process Barcode"}
                 </Button>
-                {!cameraActive ? (
+                {!cameraActive && !cameraLoading ? (
                   <Button
                     type="button"
                     onClick={startCamera}
@@ -415,15 +549,16 @@ export default function ScannerPage() {
                   >
                     📷 Use Camera
                   </Button>
-                ) : (
+                ) : cameraLoading ? (
                   <Button
                     type="button"
-                    onClick={startCamera}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                    disabled
+                    className="flex-1 bg-blue-600/50 text-white"
                   >
-                    🔄 Restart Camera
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Starting Camera...
                   </Button>
-                )}
+                ) : null}
               </div>
             </form>
           </CardContent>
