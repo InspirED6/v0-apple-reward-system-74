@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { Html5QrcodeScanner } from "html5-qrcode"
+import { Html5QrcodeScanner, Html5QrcodeSupportedFormats, Html5QrcodeScanType } from "html5-qrcode"
 
 interface ScanResult {
   success: boolean
@@ -34,6 +34,7 @@ export default function ScannerPage() {
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
   const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null)
+  const [autoStarted, setAutoStarted] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -52,6 +53,21 @@ export default function ScannerPage() {
     setUserName(storedName)
     setUserRole(storedRole)
   }, [router])
+
+  // Auto-start camera and scanning best-effort on first load
+  useEffect(() => {
+    if (autoStarted) return
+    ;(async () => {
+      try {
+        await startCamera()
+        setAutoStarted(true)
+        await startBarcodeScanning()
+      } catch {
+        // Ignore failures; user can manually start
+        setAutoStarted(true)
+      }
+    })()
+  }, [autoStarted])
 
   // Cleanup scanner on unmount
   useEffect(() => {
@@ -146,9 +162,21 @@ export default function ScannerPage() {
       const html5QrcodeScanner = new Html5QrcodeScanner(
         "scanner-container",
         {
-          fps: 10,
+          fps: 12,
           qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0
+          aspectRatio: 1.0,
+          // Prefer environment camera and support 1D barcodes
+          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.ITF,
+          ],
         },
         false
       )
@@ -215,8 +243,11 @@ export default function ScannerPage() {
     }
   }
 
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleScan = async (
+    e: React.FormEvent | null,
+    options?: { auto?: boolean }
+  ) => {
+    if (e) e.preventDefault()
 
     if (!barcode.trim()) {
       toast({
@@ -260,6 +291,14 @@ export default function ScannerPage() {
           description: data.message,
         })
         setBarcode("")
+        // Auto-award apples on successful scan when triggered by camera
+        if (options?.auto) {
+          if (data?.type === "student" && data?.studentId) {
+            await handleAddApples(1, { type: "student", id: data.studentId })
+          } else if (data?.type === "assistant" && data?.assistantId) {
+            await handleAddApples(150, { type: "assistant", id: data.assistantId })
+          }
+        }
       } else {
         toast({
           title: "Scan Failed",
@@ -278,15 +317,22 @@ export default function ScannerPage() {
     }
   }
 
-  const handleAddApples = async (amount: number) => {
-    if (!result) return
+  const handleAddApples = async (
+    amount: number,
+    target?: { type: "student" | "assistant"; id: string }
+  ) => {
+    if (!result && !target) return
 
     setApplesLoading(true)
     try {
+      const effectiveType = target?.type || (result?.type as "student" | "assistant")
+      const effectiveId = target?.id || (result?.type === "student" ? result?.studentId : result?.assistantId)
+      if (!effectiveType || !effectiveId) throw new Error("Missing target to update apples")
+
       const endpoint =
-        result.type === "student"
-          ? `/api/students/${result.studentId}/add-apples`
-          : `/api/assistants/${result.assistantId}/add-apples`
+        effectiveType === "student"
+          ? `/api/students/${effectiveId}/add-apples`
+          : `/api/assistants/${effectiveId}/add-apples`
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -304,10 +350,12 @@ export default function ScannerPage() {
           title: "Success",
           description: `${amount > 0 ? "Added" : "Subtracted"} ${Math.abs(amount)} apples`,
         })
-        setResult({
-          ...result,
-          apples: data.apples,
-        })
+        if (result) {
+          setResult({
+            ...result,
+            apples: data.apples,
+          })
+        }
       } else {
         toast({
           title: "Error",
