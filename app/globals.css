@@ -127,6 +127,8 @@
 /* Mobile camera scanner styles */
 video {
   @apply w-full h-auto rounded-lg;
+  display: block;
+  background-color: #000;
 }
 
 .camera-container {
@@ -135,4 +137,10 @@ video {
 
 .camera-overlay {
   @apply absolute inset-0 border-4 border-primary rounded-lg pointer-events-none;
+}
+
+/* Ensure video element is visible */
+video[autoplay] {
+  display: block !important;
+  visibility: visible !important;
 }
