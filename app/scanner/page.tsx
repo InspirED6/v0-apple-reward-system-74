@@ -2,13 +2,14 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
+import { BrowserMultiFormatReader } from "@zxing/library"
 
 interface ScanResult {
   success: boolean
@@ -29,6 +30,9 @@ export default function ScannerPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
+  const [isScanning, setIsScanning] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const codeReader = useRef<BrowserMultiFormatReader | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -45,21 +49,40 @@ export default function ScannerPage() {
 
     setUserName(storedName)
     setUserRole(storedRole)
-  }, [router])
+
+    // Cleanup on unmount
+    return () => {
+      if (codeReader.current) {
+        codeReader.current.reset()
+      }
+      if (videoStream) {
+        videoStream.getTracks().forEach((track) => track.stop())
+      }
+    }
+  }, [router, videoStream])
 
   const startCamera = async () => {
     try {
+      if (!codeReader.current) {
+        codeReader.current = new BrowserMultiFormatReader()
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       })
       setVideoStream(stream)
       setCameraActive(true)
 
-      const video = document.getElementById("camera-video") as HTMLVideoElement
+      const video = videoRef.current
       if (video) {
         video.srcObject = stream
+        video.play()
       }
+
+      // Start continuous scanning
+      startScanning()
     } catch (error) {
+      console.error("Camera error:", error)
       toast({
         title: "Camera Error",
         description: "Unable to access camera. Please check permissions.",
@@ -74,41 +97,80 @@ export default function ScannerPage() {
       setVideoStream(null)
       setCameraActive(false)
     }
+    setIsScanning(false)
+    if (codeReader.current) {
+      codeReader.current.reset()
+    }
+  }
+
+  const startScanning = () => {
+    if (!codeReader.current || !videoRef.current) return
+
+    setIsScanning(true)
+    
+    const scan = () => {
+      if (!isScanning || !videoRef.current) return
+
+      codeReader.current!.decodeFromVideoDevice(undefined, videoRef.current, (result, error) => {
+        if (result) {
+          const scannedCode = result.getText()
+          console.log("Scanned barcode:", scannedCode)
+          
+          // Validate barcode format (should be 4 digits)
+          if (/^\d{4}$/.test(scannedCode)) {
+            setBarcode(scannedCode)
+            setIsScanning(false)
+            stopCamera()
+            toast({
+              title: "Barcode Scanned",
+              description: `Found barcode: ${scannedCode}`,
+            })
+          } else {
+            // Continue scanning if format is invalid
+            if (isScanning) {
+              setTimeout(scan, 100)
+            }
+          }
+        } else if (error && isScanning) {
+          // Continue scanning on error
+          setTimeout(scan, 100)
+        }
+      })
+    }
+
+    scan()
   }
 
   const captureFromCamera = () => {
-    const video = document.getElementById("camera-video") as HTMLVideoElement
-    const canvas = document.getElementById("camera-canvas") as HTMLCanvasElement
+    if (!codeReader.current || !videoRef.current) return
 
-    if (video && canvas) {
-      const ctx = canvas.getContext("2d")
-      if (ctx) {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        ctx.drawImage(video, 0, 0)
-
-        // Simple barcode detection from canvas
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data = imageData.data
-
-        // Look for dark pixels that might indicate a barcode
-        let barcodeString = ""
-        for (let i = 0; i < data.length; i += 4) {
-          const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
-          if (brightness < 128) {
-            barcodeString += "1"
-          } else {
-            barcodeString += "0"
-          }
+    codeReader.current.decodeFromVideoElement(videoRef.current)
+      .then((result) => {
+        const scannedCode = result?.getText() || ""
+        console.log("Captured barcode:", scannedCode)
+        
+        if (/^\d{4}$/.test(scannedCode)) {
+          setBarcode(scannedCode)
+          toast({
+            title: "Barcode Captured",
+            description: `Found barcode: ${scannedCode}`,
+          })
+        } else {
+          toast({
+            title: "Invalid Barcode",
+            description: "Please scan a valid 4-digit barcode",
+            variant: "destructive",
+          })
         }
-
-        // Extract potential barcode (simplified)
-        const match = barcodeString.match(/1{3,}0{3,}1{3,}/)
-        if (match) {
-          setBarcode(match[0].substring(0, 20))
-        }
-      }
-    }
+      })
+      .catch((error) => {
+        console.error("Capture error:", error)
+        toast({
+          title: "Scan Failed",
+          description: "Could not detect barcode. Please try again.",
+          variant: "destructive",
+        })
+      })
   }
 
   const handleScan = async (e: React.FormEvent) => {
@@ -118,6 +180,16 @@ export default function ScannerPage() {
       toast({
         title: "Error",
         description: "Please enter or scan a barcode",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Validate barcode format (should be 4 digits)
+    if (!/^\d{4}$/.test(barcode.trim())) {
+      toast({
+        title: "Invalid Barcode Format",
+        description: "Barcode must be exactly 4 digits (e.g., 1001, 2001, 3001)",
         variant: "destructive",
       })
       return
@@ -233,13 +305,24 @@ export default function ScannerPage() {
           <Card className="mb-6 border-slate-700 bg-slate-800/50">
             <CardHeader>
               <CardTitle className="text-slate-100">Camera View</CardTitle>
+              <CardDescription className="text-slate-400">
+                {isScanning ? "Point camera at barcode to scan automatically" : "Camera ready"}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <video id="camera-video" autoPlay playsInline className="w-full rounded border border-slate-600" />
-              <canvas id="camera-canvas" className="hidden" />
+              <div className="relative">
+                <video ref={videoRef} autoPlay playsInline className="w-full rounded border border-slate-600" />
+                {isScanning && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="bg-black/50 rounded-lg p-4">
+                      <div className="animate-pulse text-white text-sm">Scanning...</div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2">
-                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700">
-                  Capture
+                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={isScanning}>
+                  Manual Capture
                 </Button>
                 <Button
                   onClick={stopCamera}
@@ -267,22 +350,30 @@ export default function ScannerPage() {
                 <label className="text-sm font-medium text-slate-200">Barcode</label>
                 <Input
                   type="text"
-                  placeholder="Enter or scan barcode..."
+                  placeholder="Enter 4-digit barcode (e.g., 1001, 2001, 3001)..."
                   value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
+                  onChange={(e) => {
+                    // Only allow digits and limit to 4 characters
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 4)
+                    setBarcode(value)
+                  }}
                   className="bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400"
                   disabled={loading}
                   autoFocus
+                  maxLength={4}
                 />
+                <p className="text-xs text-slate-400">
+                  Student barcodes start with 1, Admin with 2, Assistant with 3
+                </p>
               </div>
 
               <div className="flex gap-2">
                 <Button
                   type="submit"
                   className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-semibold"
-                  disabled={loading}
+                  disabled={loading || barcode.length !== 4}
                 >
-                  {loading ? "Scanning..." : "Scan"}
+                  {loading ? "Processing..." : "Process Barcode"}
                 </Button>
                 {!cameraActive ? (
                   <Button
@@ -290,7 +381,7 @@ export default function ScannerPage() {
                     onClick={startCamera}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    📷 Camera
+                    📷 Use Camera
                   </Button>
                 ) : null}
               </div>
