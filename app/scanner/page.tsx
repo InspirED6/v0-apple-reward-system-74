@@ -32,6 +32,7 @@ export default function ScannerPage() {
   const [applesLoading, setApplesLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -71,9 +72,10 @@ export default function ScannerPage() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: "environment",
-          width: { ideal: 640 },
-          height: { ideal: 480 }
+          width: { ideal: 640, min: 320 },
+          height: { ideal: 480, min: 240 }
         },
+        audio: false
       })
       
       setVideoStream(stream)
@@ -88,17 +90,27 @@ export default function ScannerPage() {
         video.playsInline = true
         video.setAttribute('playsinline', 'true')
         video.setAttribute('webkit-playsinline', 'true')
+        video.setAttribute('autoplay', 'true')
         
         // Add event listeners for debugging
         video.addEventListener('loadedmetadata', () => {
           console.log('Video metadata loaded:', video.videoWidth, 'x', video.videoHeight)
+          // Force video to play after metadata is loaded
+          video.play().catch(console.error)
         })
         
         video.addEventListener('canplay', () => {
           console.log('Video can play')
+          setVideoReady(true)
+          video.play().catch(console.error)
         })
         
-        // Ensure video plays
+        video.addEventListener('loadeddata', () => {
+          console.log('Video data loaded')
+          video.play().catch(console.error)
+        })
+        
+        // Ensure video plays immediately
         video.play().catch((playError) => {
           console.error('Video play error:', playError)
           toast({
@@ -107,7 +119,42 @@ export default function ScannerPage() {
             variant: "destructive",
           })
         })
+
+        // Force play after a short delay to ensure video is ready
+        setTimeout(() => {
+          if (video.paused) {
+            video.play().catch(console.error)
+          }
+        }, 500)
       }
+
+        // Check if video is actually playing
+        setTimeout(() => {
+          const video = videoRef.current
+          if (video) {
+            console.log('Video state:', {
+              paused: video.paused,
+              readyState: video.readyState,
+              videoWidth: video.videoWidth,
+              videoHeight: video.videoHeight,
+              srcObject: !!video.srcObject
+            })
+            
+            if (video.paused || video.readyState < 2) {
+              console.log('Video not ready, attempting to play again')
+              video.play().catch(console.error)
+            }
+            
+            // If video still not ready after 2 seconds, show warning
+            if (!videoReady && (video.paused || video.readyState < 2)) {
+              toast({
+                title: "Camera Display Issue",
+                description: "Camera is active but video may not be visible. You can still use manual entry below.",
+                variant: "destructive",
+              })
+            }
+          }
+        }, 2000)
 
       toast({
         title: "Camera Ready",
@@ -142,6 +189,7 @@ export default function ScannerPage() {
       setVideoStream(null)
       setCameraActive(false)
       setIsScanning(false)
+      setVideoReady(false)
     }
   }
 
@@ -291,7 +339,7 @@ export default function ScannerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="relative bg-black rounded-lg overflow-hidden min-h-[256px]">
+              <div className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
                 {cameraLoading ? (
                   <div className="flex items-center justify-center h-64">
                     <div className="text-center">
@@ -309,17 +357,45 @@ export default function ScannerPage() {
                       className="w-full h-64 object-cover"
                       style={{ 
                         transform: 'scaleX(-1)',
-                        backgroundColor: '#000'
+                        backgroundColor: '#000',
+                        minHeight: '256px'
                       }}
                       onLoadStart={() => console.log('Video load started')}
                       onLoadedData={() => console.log('Video data loaded')}
-                      onError={(e) => console.error('Video error:', e)}
+                      onError={(e) => {
+                        console.error('Video error:', e)
+                        toast({
+                          title: "Video Error",
+                          description: "Failed to load camera video. Please try refreshing the camera.",
+                          variant: "destructive",
+                        })
+                      }}
+                      onCanPlay={() => {
+                        console.log('Video can play')
+                        videoRef.current?.play().catch(console.error)
+                      }}
+                      onPlay={() => {
+                        console.log('Video playing')
+                        setVideoReady(true)
+                      }}
+                      onPause={() => console.log('Video paused')}
+                      onStalled={() => console.log('Video stalled')}
                     />
+                    {/* Camera status indicator */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="bg-black/30 rounded-lg p-4 border border-white/20">
+                      <div className={`rounded-lg p-4 border ${videoReady ? 'bg-green-500/20 border-green-400' : 'bg-black/50 border-white/20'}`}>
                         <div className="text-white text-sm text-center">
                           <div className="mb-2">📷 Camera View</div>
                           <div className="text-xs">Manually enter barcode below</div>
+                          {videoReady ? (
+                            <div className="text-xs text-green-300 mt-1">
+                              ✓ Camera active
+                            </div>
+                          ) : (
+                            <div className="text-xs text-yellow-300 mt-1">
+                              Loading camera...
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
