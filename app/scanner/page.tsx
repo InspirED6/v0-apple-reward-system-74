@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import Quagga from "quagga/dist/quagga.min.js"
+import { Html5QrcodeScanner } from "html5-qrcode"
 
 interface ScanResult {
   success: boolean
@@ -33,7 +33,7 @@ export default function ScannerPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
-  const [quaggaInitialized, setQuaggaInitialized] = useState(false)
+  const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -53,54 +53,18 @@ export default function ScannerPage() {
     setUserRole(storedRole)
   }, [router])
 
-  // Initialize QuaggaJS
+  // Cleanup scanner on unmount
   useEffect(() => {
     return () => {
-      if (quaggaInitialized) {
-        Quagga.stop()
+      if (scanner) {
+        scanner.clear()
       }
-    }
-  }, [quaggaInitialized])
-
-  // Cleanup video stream on unmount
-  useEffect(() => {
-    return () => {
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
-      if (quaggaInitialized) {
-        Quagga.stop()
-      }
     }
-  }, [videoStream, quaggaInitialized])
+  }, [scanner, videoStream])
 
-  // Add effect to handle video element updates
-  useEffect(() => {
-    const video = videoRef.current
-    if (video && videoStream) {
-      video.srcObject = videoStream
-      
-      const handleLoadedMetadata = () => {
-        video.play().catch((error) => {
-          console.error("Video play error:", error)
-        })
-      }
-      
-      const handleCanPlay = () => {
-        video.play().catch((error) => {
-          console.error("Video play error:", error)
-        })
-      }
-      
-      video.addEventListener('loadedmetadata', handleLoadedMetadata)
-      video.addEventListener('canplay', handleCanPlay)
-      
-      return () => {
-        video.removeEventListener('loadedmetadata', handleLoadedMetadata)
-        video.removeEventListener('canplay', handleCanPlay)
-      }
-    }
-  }, [videoStream])
 
   const startCamera = async () => {
     setCameraLoading(true)
@@ -110,6 +74,7 @@ export default function ScannerPage() {
         throw new Error("Camera not supported on this device")
       }
 
+      // Test camera access
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: "environment",
@@ -119,55 +84,12 @@ export default function ScannerPage() {
         audio: false
       })
       
-      setVideoStream(stream)
+      // Stop the test stream
+      stream.getTracks().forEach(track => track.stop())
+      
       setCameraActive(true)
       setIsScanning(false)
       setCameraLoading(false)
-
-      const video = videoRef.current
-      if (video) {
-        video.srcObject = stream
-        video.muted = true
-        video.playsInline = true
-        video.setAttribute('playsinline', 'true')
-        video.setAttribute('webkit-playsinline', 'true')
-        video.setAttribute('autoplay', 'true')
-        
-        // Add event listeners for debugging
-        video.addEventListener('loadedmetadata', () => {
-          console.log('Video metadata loaded:', video.videoWidth, 'x', video.videoHeight)
-          setVideoReady(true)
-          video.play().catch(console.error)
-        })
-        
-        video.addEventListener('canplay', () => {
-          console.log('Video can play')
-          setVideoReady(true)
-          video.play().catch(console.error)
-        })
-        
-        video.addEventListener('loadeddata', () => {
-          console.log('Video data loaded')
-          video.play().catch(console.error)
-        })
-        
-        // Ensure video plays immediately
-        video.play().catch((playError) => {
-          console.error('Video play error:', playError)
-          toast({
-            title: "Video Playback Error",
-            description: "Camera started but video may not be visible. Try refreshing the page.",
-            variant: "destructive",
-          })
-        })
-
-        // Force play after a short delay to ensure video is ready
-        setTimeout(() => {
-          if (video.paused) {
-            video.play().catch(console.error)
-          }
-        }, 500)
-      }
 
       toast({
         title: "Camera Ready",
@@ -197,17 +119,22 @@ export default function ScannerPage() {
   }
 
   const stopCamera = () => {
+    if (scanner) {
+      scanner.clear()
+      setScanner(null)
+    }
     if (videoStream) {
       videoStream.getTracks().forEach((track) => track.stop())
       setVideoStream(null)
-      setCameraActive(false)
-      setIsScanning(false)
-      setVideoReady(false)
     }
+    setCameraActive(false)
+    setIsScanning(false)
+    setVideoReady(false)
   }
 
   const startBarcodeScanning = async () => {
-    if (!videoRef.current) return
+    const scannerContainer = document.getElementById('scanner-container')
+    if (!scannerContainer) return
 
     setIsScanning(true)
     toast({
@@ -216,53 +143,30 @@ export default function ScannerPage() {
     })
 
     try {
-      Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: document.querySelector('#scanner-container'),
-          constraints: {
-            width: 640,
-            height: 480,
-            facingMode: "environment"
-          }
+      const html5QrcodeScanner = new Html5QrcodeScanner(
+        "scanner-container",
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0
         },
-        decoder: {
-          readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader", "i2of5_reader"]
-        },
-        locate: true,
-        locator: {
-          patchSize: "medium",
-          halfSample: true
-        }
-      }, (err) => {
-        if (err) {
-          console.error('Quagga initialization error:', err)
-          toast({
-            title: "Scanning Error",
-            description: "Failed to initialize barcode scanner. Please try again.",
-            variant: "destructive",
-          })
-          setIsScanning(false)
-          return
-        }
-        
-        setQuaggaInitialized(true)
-        Quagga.start()
-        
-        // Listen for successful scans
-        Quagga.onDetected((data) => {
-          const scannedCode = data.codeResult.code
-          console.log('Barcode detected:', scannedCode)
+        false
+      )
+
+      setScanner(html5QrcodeScanner)
+
+      html5QrcodeScanner.render(
+        (decodedText) => {
+          console.log('Barcode detected:', decodedText)
           
           // Validate the scanned barcode format
-          if (/^\d{4}$/.test(scannedCode)) {
-            setBarcode(scannedCode)
+          if (/^\d{4}$/.test(decodedText)) {
+            setBarcode(decodedText)
             setIsScanning(false)
-            Quagga.stop()
+            html5QrcodeScanner.clear()
             toast({
               title: "Barcode Scanned!",
-              description: `Detected: ${scannedCode}. Click "Process Barcode" to continue.`,
+              description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
             })
             // Automatically process the scanned barcode
             setTimeout(() => {
@@ -275,8 +179,15 @@ export default function ScannerPage() {
               variant: "destructive",
             })
           }
-        })
-      })
+        },
+        (error) => {
+          // This is called for every scan attempt, so we don't show errors for normal operation
+          // Only log actual errors, not normal "no barcode found" messages
+          if (error && !error.includes("NotFoundException")) {
+            console.error('Scanning error:', error)
+          }
+        }
+      )
     } catch (error) {
       console.error('Failed to start barcode scanning:', error)
       toast({
@@ -289,8 +200,9 @@ export default function ScannerPage() {
   }
 
   const stopBarcodeScanning = () => {
-    if (quaggaInitialized) {
-      Quagga.stop()
+    if (scanner) {
+      scanner.clear()
+      setScanner(null)
     }
     setIsScanning(false)
   }
@@ -448,67 +360,24 @@ export default function ScannerPage() {
                       <div className="text-white text-sm">Starting camera...</div>
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <video 
-                      ref={videoRef} 
-                      autoPlay 
-                      playsInline 
-                      muted
-                      className="w-full h-64 object-cover"
-                      style={{ 
-                        backgroundColor: '#000',
-                        minHeight: '256px'
-                      }}
-                      onLoadStart={() => console.log('Video load started')}
-                      onLoadedData={() => console.log('Video data loaded')}
-                      onError={(e) => {
-                        console.error('Video error:', e)
-                        toast({
-                          title: "Video Error",
-                          description: "Failed to load camera video. Please try refreshing the camera.",
-                          variant: "destructive",
-                        })
-                      }}
-                      onCanPlay={() => {
-                        console.log('Video can play')
-                        videoRef.current?.play().catch(console.error)
-                      }}
-                      onPlay={() => {
-                        console.log('Video playing')
-                        setVideoReady(true)
-                      }}
-                      onPause={() => console.log('Video paused')}
-                      onStalled={() => console.log('Video stalled')}
-                    />
-                    {/* Camera status indicator */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className={`rounded-lg p-4 border ${videoReady ? 'bg-green-500/20 border-green-400' : 'bg-black/50 border-white/20'}`}>
-                        <div className="text-white text-sm text-center">
-                          <div className="mb-2">📷 Camera View</div>
-                          <div className="text-xs">
-                            {isScanning ? "Scanning for barcodes..." : "Click 'Start Scanning' to scan barcodes"}
-                          </div>
-                          {videoReady ? (
-                            <div className="text-xs text-green-300 mt-1">
-                              ✓ Camera active
-                            </div>
-                          ) : (
-                            <div className="text-xs text-yellow-300 mt-1">
-                              Loading camera...
-                            </div>
-                          )}
-                        </div>
+                ) : isScanning ? (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <div className="mb-2">📷 Scanning for barcodes...</div>
+                      <div className="text-xs text-green-300">
+                        Point camera at a 4-digit barcode
                       </div>
                     </div>
-                    {/* Scanning overlay */}
-                    <div className="absolute inset-0 border-2 border-green-400 rounded-lg pointer-events-none">
-                      <div className="absolute top-2 left-2 w-6 h-6 border-t-2 border-l-2 border-green-400"></div>
-                      <div className="absolute top-2 right-2 w-6 h-6 border-t-2 border-r-2 border-green-400"></div>
-                      <div className="absolute bottom-2 left-2 w-6 h-6 border-b-2 border-l-2 border-green-400"></div>
-                      <div className="absolute bottom-2 right-2 w-6 h-6 border-b-2 border-r-2 border-green-400"></div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <div className="mb-2">📷 Camera Ready</div>
+                      <div className="text-xs text-slate-300">
+                        Click 'Start Scanning' to scan barcodes
+                      </div>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
               <div className="flex gap-2">
