@@ -30,6 +30,7 @@ export default function ScannerPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
+  const [isScanning, setIsScanning] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -63,6 +64,7 @@ export default function ScannerPage() {
       })
       setVideoStream(stream)
       setCameraActive(true)
+      setIsScanning(false)
 
       const video = videoRef.current
       if (video) {
@@ -89,11 +91,13 @@ export default function ScannerPage() {
       videoStream.getTracks().forEach((track) => track.stop())
       setVideoStream(null)
       setCameraActive(false)
+      setIsScanning(false)
     }
   }
 
   const captureFromCamera = () => {
     // Simple camera capture - user can manually enter the barcode they see
+    setIsScanning(true)
     toast({
       title: "Manual Entry",
       description: "Please manually enter the barcode you see in the camera view.",
