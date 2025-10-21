@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats, Html5QrcodeScanType } from "html5-qrcode"
+import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser"
 
 interface ScanResult {
   success: boolean
@@ -33,7 +33,7 @@ export default function ScannerPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
-  const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null)
+  const [scannerControls, setScannerControls] = useState<IScannerControls | null>(null)
   const [autoStarted, setAutoStarted] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
@@ -72,14 +72,14 @@ export default function ScannerPage() {
   // Cleanup scanner on unmount
   useEffect(() => {
     return () => {
-      if (scanner) {
-        scanner.clear()
+      if (scannerControls) {
+        try { scannerControls.stop(); } catch {}
       }
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
     }
-  }, [scanner, videoStream])
+  }, [scannerControls, videoStream])
 
 
   const startCamera = async () => {
@@ -135,9 +135,9 @@ export default function ScannerPage() {
   }
 
   const stopCamera = () => {
-    if (scanner) {
-      scanner.clear()
-      setScanner(null)
+    if (scannerControls) {
+      try { scannerControls.stop() } catch {}
+      setScannerControls(null)
     }
     if (videoStream) {
       videoStream.getTracks().forEach((track) => track.stop())
@@ -149,8 +149,7 @@ export default function ScannerPage() {
   }
 
   const startBarcodeScanning = async () => {
-    const scannerContainer = document.getElementById('scanner-container')
-    if (!scannerContainer) return
+    if (!videoRef.current) return
 
     setIsScanning(true)
     toast({
@@ -216,6 +215,9 @@ export default function ScannerPage() {
           }
         }
       )
+
+      const controls = await controlsPromise
+      setScannerControls(controls)
     } catch (error) {
       console.error('Failed to start barcode scanning:', error)
       toast({
@@ -228,9 +230,9 @@ export default function ScannerPage() {
   }
 
   const stopBarcodeScanning = () => {
-    if (scanner) {
-      scanner.clear()
-      setScanner(null)
+    if (scannerControls) {
+      try { scannerControls.stop() } catch {}
+      setScannerControls(null)
     }
     setIsScanning(false)
   }
@@ -401,29 +403,21 @@ export default function ScannerPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
-                {cameraLoading ? (
+                <video id="scanner-video" ref={videoRef} muted playsInline autoPlay></video>
+                {!cameraLoading && (
+                  <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs pointer-events-none">
+                    {isScanning ? (
+                      <div className="text-green-300">Point camera at a 4-digit barcode</div>
+                    ) : (
+                      <div className="text-slate-300">Click 'Start Scanning' to scan barcodes</div>
+                    )}
+                  </div>
+                )}
+                {cameraLoading && (
                   <div className="flex items-center justify-center h-64">
                     <div className="text-center">
                       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
                       <div className="text-white text-sm">Starting camera...</div>
-                    </div>
-                  </div>
-                ) : isScanning ? (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="text-center text-white">
-                      <div className="mb-2">📷 Scanning for barcodes...</div>
-                      <div className="text-xs text-green-300">
-                        Point camera at a 4-digit barcode
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="text-center text-white">
-                      <div className="mb-2">📷 Camera Ready</div>
-                      <div className="text-xs text-slate-300">
-                        Click 'Start Scanning' to scan barcodes
-                      </div>
                     </div>
                   </div>
                 )}
