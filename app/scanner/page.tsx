@@ -170,13 +170,13 @@ export default function ScannerPage() {
             Html5QrcodeSupportedFormats.CODE_39,
             Html5QrcodeSupportedFormats.ITF,
           ],
-        },
-      }
+        }
+      )
 
       scannerRef.current.render(
         (decodedText) => {
           console.log('Barcode detected:', decodedText)
-          
+
           // Validate the scanned barcode format
           if (/^\d{4}$/.test(decodedText)) {
             setBarcode(decodedText)
@@ -197,31 +197,9 @@ export default function ScannerPage() {
               variant: "destructive",
             })
           }
-          if (result) {
-            const decodedText = result.getText()
-            console.log("Barcode detected:", decodedText)
-            if (/^\d{4}$/.test(decodedText)) {
-              setBarcode(decodedText)
-              setIsScanning(false)
-              try { scannerControlsRef.current?.stop() } catch {}
-              try { readerRef.current?.reset() } catch {}
-              toast({
-                title: "Barcode Scanned!",
-                description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
-              })
-              setTimeout(() => {
-                handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
-              }, 500)
-            } else {
-              toast({
-                title: "Invalid Barcode",
-                description: "Scanned code must be 4 digits. Please try again.",
-                variant: "destructive",
-              })
-            }
-          } else if (err && !(err instanceof NotFoundException)) {
-            console.error("Scanning error:", err)
-          }
+        },
+        (_errorMessage) => {
+          // Ignore frequent scan failures/noise
         }
       )
     } catch (error) {
