@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/db"
+import { getSupabaseClient } from "@/lib/db"
 
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await request.json()
+    const supabase = getSupabaseClient()
 
     if (!userId) {
       return NextResponse.json({ message: "Missing userId" }, { status: 400 })

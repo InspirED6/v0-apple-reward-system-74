@@ -171,8 +171,7 @@ export default function ScannerPage() {
             Html5QrcodeSupportedFormats.ITF,
           ],
         },
-        false
-      )
+      }
 
       scannerRef.current.render(
         (decodedText) => {
@@ -198,17 +197,35 @@ export default function ScannerPage() {
               variant: "destructive",
             })
           }
-        },
-        (error) => {
-          // This is called for every scan attempt, so we don't show errors for normal operation
-          // Only log actual errors, not normal "no barcode found" messages
-          if (error && !error.includes("NotFoundException")) {
-            console.error('Scanning error:', error)
+          if (result) {
+            const decodedText = result.getText()
+            console.log("Barcode detected:", decodedText)
+            if (/^\d{4}$/.test(decodedText)) {
+              setBarcode(decodedText)
+              setIsScanning(false)
+              try { scannerControlsRef.current?.stop() } catch {}
+              try { readerRef.current?.reset() } catch {}
+              toast({
+                title: "Barcode Scanned!",
+                description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
+              })
+              setTimeout(() => {
+                handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
+              }, 500)
+            } else {
+              toast({
+                title: "Invalid Barcode",
+                description: "Scanned code must be 4 digits. Please try again.",
+                variant: "destructive",
+              })
+            }
+          } else if (err && !(err instanceof NotFoundException)) {
+            console.error("Scanning error:", err)
           }
         }
       )
     } catch (error) {
-      console.error('Failed to start barcode scanning:', error)
+      console.error("Failed to start barcode scanning:", error)
       toast({
         title: "Scanning Error",
         description: "Failed to start barcode scanning. Please try again.",

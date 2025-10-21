@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/db"
+import { getSupabaseClient } from "@/lib/db"
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -10,6 +10,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ message: "Invalid apple amount" }, { status: 400 })
     }
 
+    const supabase = getSupabaseClient()
     const { data: student, error } = await supabase
       .from("students")
       .select("id, name, apples")

@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/db"
+import { getSupabaseClient } from "@/lib/db"
 
 export async function GET(request: NextRequest, { params }: { params: { name: string } }) {
+  const supabase = getSupabaseClient()
   try {
     const name = decodeURIComponent(params.name)
     const role = request.nextUrl.searchParams.get("role") || "admin"
