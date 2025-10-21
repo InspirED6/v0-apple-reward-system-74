@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/db"
+import { getSupabaseClient } from "@/lib/db"
 
 export async function POST(request: NextRequest) {
   try {
     const { barcode, userRole, userId } = await request.json()
+    const supabase = getSupabaseClient()
 
     if (!barcode || !userRole || !userId) {
       return NextResponse.json({ message: "Missing required fields" }, { status: 400 })

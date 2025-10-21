@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from "html5-qrcode"
+import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser"
+import { BarcodeFormat, DecodeHintType, NotFoundException } from "@zxing/library"
 
 interface ScanResult {
   success: boolean
@@ -33,7 +34,9 @@ export default function ScannerPage() {
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
   const [autoStarted, setAutoStarted] = useState(false)
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
+  const scannerControlsRef = useRef<IScannerControls | null>(null)
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -70,9 +73,10 @@ export default function ScannerPage() {
   // Cleanup scanner on unmount
   useEffect(() => {
     return () => {
-      if (scannerRef.current) {
-        try { scannerRef.current.clear() } catch {}
-      }
+      try { scannerControlsRef.current?.stop() } catch {}
+      try { readerRef.current?.reset() } catch {}
+      scannerControlsRef.current = null
+      readerRef.current = null
     }
   }, [])
 
@@ -130,10 +134,10 @@ export default function ScannerPage() {
   }
 
   const stopCamera = () => {
-    if (scannerRef.current) {
-      try { scannerRef.current.clear() } catch {}
-      scannerRef.current = null
-    }
+    try { scannerControlsRef.current?.stop() } catch {}
+    scannerControlsRef.current = null
+    try { readerRef.current?.reset() } catch {}
+    readerRef.current = null
     setCameraActive(false)
     setIsScanning(false)
     setVideoReady(false)
@@ -147,68 +151,75 @@ export default function ScannerPage() {
     })
 
     try {
-      // Ensure container exists (in case state hasn't rendered yet)
+      // Ensure container and video exist
       if (!document.getElementById("scanner-container")) {
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
+      if (!document.getElementById("scanner-video")) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
 
-      scannerRef.current = new Html5QrcodeScanner(
-        "scanner-container",
-        {
-          fps: 12,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          // Prefer environment camera and support 1D barcodes
-          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.ITF,
-          ],
+      const formats = [
+        BarcodeFormat.QR_CODE,
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.ITF,
+      ]
+      const hints = new Map()
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, formats)
+
+      readerRef.current = new BrowserMultiFormatReader(hints, 200)
+
+      const constraints: MediaStreamConstraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 640, min: 320 },
+          height: { ideal: 480, min: 240 },
         },
-        false
-      )
+      }
 
-      scannerRef.current.render(
-        (decodedText) => {
-          console.log('Barcode detected:', decodedText)
-          
-          // Validate the scanned barcode format
-          if (/^\d{4}$/.test(decodedText)) {
-            setBarcode(decodedText)
-            setIsScanning(false)
-            try { scannerRef.current?.clear() } catch {}
-            toast({
-              title: "Barcode Scanned!",
-              description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
-            })
-            // Automatically process the scanned barcode
-            setTimeout(() => {
-              handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
-            }, 500)
-          } else {
-            toast({
-              title: "Invalid Barcode",
-              description: "Scanned code must be 4 digits. Please try again.",
-              variant: "destructive",
-            })
+      const controls = await readerRef.current.decodeFromConstraints(
+        constraints,
+        "scanner-video",
+        (result, err, ctrl) => {
+          if (ctrl) {
+            scannerControlsRef.current = ctrl
           }
-        },
-        (error) => {
-          // This is called for every scan attempt, so we don't show errors for normal operation
-          // Only log actual errors, not normal "no barcode found" messages
-          if (error && !error.includes("NotFoundException")) {
-            console.error('Scanning error:', error)
+          if (result) {
+            const decodedText = result.getText()
+            console.log("Barcode detected:", decodedText)
+            if (/^\d{4}$/.test(decodedText)) {
+              setBarcode(decodedText)
+              setIsScanning(false)
+              try { scannerControlsRef.current?.stop() } catch {}
+              try { readerRef.current?.reset() } catch {}
+              toast({
+                title: "Barcode Scanned!",
+                description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
+              })
+              setTimeout(() => {
+                handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
+              }, 500)
+            } else {
+              toast({
+                title: "Invalid Barcode",
+                description: "Scanned code must be 4 digits. Please try again.",
+                variant: "destructive",
+              })
+            }
+          } else if (err && !(err instanceof NotFoundException)) {
+            console.error("Scanning error:", err)
           }
         }
       )
+      scannerControlsRef.current = controls
     } catch (error) {
-      console.error('Failed to start barcode scanning:', error)
+      console.error("Failed to start barcode scanning:", error)
       toast({
         title: "Scanning Error",
         description: "Failed to start barcode scanning. Please try again.",
@@ -219,10 +230,10 @@ export default function ScannerPage() {
   }
 
   const stopBarcodeScanning = () => {
-    if (scannerRef.current) {
-      try { scannerRef.current.clear() } catch {}
-      scannerRef.current = null
-    }
+    try { scannerControlsRef.current?.stop() } catch {}
+    scannerControlsRef.current = null
+    try { readerRef.current?.reset() } catch {}
+    readerRef.current = null
     setIsScanning(false)
   }
 
@@ -390,8 +401,19 @@ export default function ScannerPage() {
                 {cameraLoading ? "Starting camera..." : isScanning ? "Point camera at barcode to scan automatically" : "Camera ready - click 'Start Scanning' to scan barcodes"}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+              <CardContent className="space-y-4">
                 <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
+                {isScanning && (
+                  <video
+                    id="scanner-video"
+                    ref={videoRef}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    muted
+                    autoPlay
+                    playsInline
+                    onLoadedData={() => setVideoReady(true)}
+                  />
+                )}
                 {!cameraLoading && (
                   <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs pointer-events-none">
                     {isScanning ? (
