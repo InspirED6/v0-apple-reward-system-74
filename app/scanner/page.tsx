@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser"
+import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from "html5-qrcode"
 
 interface ScanResult {
   success: boolean
@@ -28,14 +28,12 @@ export default function ScannerPage() {
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState("")
   const [cameraActive, setCameraActive] = useState(false)
-  const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
-  const [scannerControls, setScannerControls] = useState<IScannerControls | null>(null)
   const [autoStarted, setAutoStarted] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -72,14 +70,11 @@ export default function ScannerPage() {
   // Cleanup scanner on unmount
   useEffect(() => {
     return () => {
-      if (scannerControls) {
-        try { scannerControls.stop(); } catch {}
-      }
-      if (videoStream) {
-        videoStream.getTracks().forEach((track) => track.stop())
+      if (scannerRef.current) {
+        try { scannerRef.current.clear() } catch {}
       }
     }
-  }, [scannerControls, videoStream])
+  }, [])
 
 
   const startCamera = async () => {
@@ -135,13 +130,9 @@ export default function ScannerPage() {
   }
 
   const stopCamera = () => {
-    if (scannerControls) {
-      try { scannerControls.stop() } catch {}
-      setScannerControls(null)
-    }
-    if (videoStream) {
-      videoStream.getTracks().forEach((track) => track.stop())
-      setVideoStream(null)
+    if (scannerRef.current) {
+      try { scannerRef.current.clear() } catch {}
+      scannerRef.current = null
     }
     setCameraActive(false)
     setIsScanning(false)
@@ -149,8 +140,6 @@ export default function ScannerPage() {
   }
 
   const startBarcodeScanning = async () => {
-    if (!videoRef.current) return
-
     setIsScanning(true)
     toast({
       title: "Scanning Started",
@@ -158,7 +147,12 @@ export default function ScannerPage() {
     })
 
     try {
-      const html5QrcodeScanner = new Html5QrcodeScanner(
+      // Ensure container exists (in case state hasn't rendered yet)
+      if (!document.getElementById("scanner-container")) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+
+      scannerRef.current = new Html5QrcodeScanner(
         "scanner-container",
         {
           fps: 12,
@@ -180,9 +174,7 @@ export default function ScannerPage() {
         false
       )
 
-      setScanner(html5QrcodeScanner)
-
-      html5QrcodeScanner.render(
+      scannerRef.current.render(
         (decodedText) => {
           console.log('Barcode detected:', decodedText)
           
@@ -190,14 +182,14 @@ export default function ScannerPage() {
           if (/^\d{4}$/.test(decodedText)) {
             setBarcode(decodedText)
             setIsScanning(false)
-            html5QrcodeScanner.clear()
+            try { scannerRef.current?.clear() } catch {}
             toast({
               title: "Barcode Scanned!",
               description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
             })
             // Automatically process the scanned barcode
             setTimeout(() => {
-              handleScan({ preventDefault: () => {} } as React.FormEvent)
+              handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
             }, 500)
           } else {
             toast({
@@ -215,9 +207,6 @@ export default function ScannerPage() {
           }
         }
       )
-
-      const controls = await controlsPromise
-      setScannerControls(controls)
     } catch (error) {
       console.error('Failed to start barcode scanning:', error)
       toast({
@@ -230,9 +219,9 @@ export default function ScannerPage() {
   }
 
   const stopBarcodeScanning = () => {
-    if (scannerControls) {
-      try { scannerControls.stop() } catch {}
-      setScannerControls(null)
+    if (scannerRef.current) {
+      try { scannerRef.current.clear() } catch {}
+      scannerRef.current = null
     }
     setIsScanning(false)
   }
@@ -402,8 +391,7 @@ export default function ScannerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
-                <video id="scanner-video" ref={videoRef} muted playsInline autoPlay></video>
+                <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
                 {!cameraLoading && (
                   <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs pointer-events-none">
                     {isScanning ? (
@@ -533,7 +521,7 @@ export default function ScannerPage() {
                 {!cameraActive && !cameraLoading ? (
                   <Button
                     type="button"
-                    onClick={startCamera}
+                    onClick={async () => { await startCamera(); await startBarcodeScanning() }}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >
                     📷 Open Camera
