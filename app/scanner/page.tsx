@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-// We'll use a simpler approach without external libraries for now
+import { BrowserMultiFormatReader } from "@zxing/library"
 
 interface ScanResult {
   success: boolean
@@ -33,6 +33,7 @@ export default function ScannerPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
+  const [codeReader, setCodeReader] = useState<BrowserMultiFormatReader | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -52,14 +53,27 @@ export default function ScannerPage() {
     setUserRole(storedRole)
   }, [router])
 
+  // Initialize barcode reader
+  useEffect(() => {
+    const reader = new BrowserMultiFormatReader()
+    setCodeReader(reader)
+    
+    return () => {
+      reader.reset()
+    }
+  }, [])
+
   // Cleanup video stream on unmount
   useEffect(() => {
     return () => {
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
+      if (codeReader) {
+        codeReader.reset()
+      }
     }
-  }, [videoStream])
+  }, [videoStream, codeReader])
 
   // Add effect to handle video element updates
   useEffect(() => {
@@ -221,13 +235,69 @@ export default function ScannerPage() {
     }
   }
 
-  const captureFromCamera = () => {
-    // Simple camera capture - user can manually enter the barcode they see
+  const startBarcodeScanning = async () => {
+    if (!codeReader || !videoRef.current) return
+
     setIsScanning(true)
     toast({
-      title: "Manual Entry",
-      description: "Please manually enter the barcode you see in the camera view.",
+      title: "Scanning Started",
+      description: "Point the camera at a barcode to scan automatically.",
     })
+
+    try {
+      const result = await codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result, error) => {
+        if (result) {
+          const scannedCode = result.getText()
+          console.log('Barcode detected:', scannedCode)
+          
+          // Validate the scanned barcode format
+          if (/^\d{4}$/.test(scannedCode)) {
+            setBarcode(scannedCode)
+            setIsScanning(false)
+            toast({
+              title: "Barcode Scanned!",
+              description: `Detected: ${scannedCode}. Click "Process Barcode" to continue.`,
+            })
+            // Automatically process the scanned barcode
+            setTimeout(() => {
+              handleScan({ preventDefault: () => {} } as React.FormEvent)
+            }, 500)
+          } else {
+            toast({
+              title: "Invalid Barcode",
+              description: "Scanned code must be 4 digits. Please try again.",
+              variant: "destructive",
+            })
+          }
+        }
+        if (error && !(error instanceof Error && error.name === 'NotFoundException')) {
+          console.error('Barcode scanning error:', error)
+        }
+      })
+    } catch (error) {
+      console.error('Failed to start barcode scanning:', error)
+      toast({
+        title: "Scanning Error",
+        description: "Failed to start barcode scanning. Please try again.",
+        variant: "destructive",
+      })
+      setIsScanning(false)
+    }
+  }
+
+  const stopBarcodeScanning = () => {
+    if (codeReader) {
+      codeReader.reset()
+    }
+    setIsScanning(false)
+  }
+
+  const captureFromCamera = () => {
+    if (isScanning) {
+      stopBarcodeScanning()
+    } else {
+      startBarcodeScanning()
+    }
   }
 
   const handleScan = async (e: React.FormEvent) => {
@@ -363,7 +433,7 @@ export default function ScannerPage() {
             <CardHeader>
               <CardTitle className="text-slate-100">Camera View</CardTitle>
               <CardDescription className="text-slate-400">
-                {cameraLoading ? "Starting camera..." : isScanning ? "Point camera at barcode to scan automatically" : "Camera ready"}
+                {cameraLoading ? "Starting camera..." : isScanning ? "Point camera at barcode to scan automatically" : "Camera ready - click 'Start Scanning' to scan barcodes"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -384,7 +454,6 @@ export default function ScannerPage() {
                       muted
                       className="w-full h-64 object-cover"
                       style={{ 
-                        transform: 'scaleX(-1)',
                         backgroundColor: '#000',
                         minHeight: '256px'
                       }}
@@ -414,7 +483,9 @@ export default function ScannerPage() {
                       <div className={`rounded-lg p-4 border ${videoReady ? 'bg-green-500/20 border-green-400' : 'bg-black/50 border-white/20'}`}>
                         <div className="text-white text-sm text-center">
                           <div className="mb-2">📷 Camera View</div>
-                          <div className="text-xs">Manually enter barcode below</div>
+                          <div className="text-xs">
+                            {isScanning ? "Scanning for barcodes..." : "Click 'Start Scanning' to scan barcodes"}
+                          </div>
                           {videoReady ? (
                             <div className="text-xs text-green-300 mt-1">
                               ✓ Camera active
@@ -443,7 +514,7 @@ export default function ScannerPage() {
                   className="flex-1 bg-blue-600 hover:bg-blue-700"
                   disabled={cameraLoading}
                 >
-                  📷 Camera Help
+                  {isScanning ? "🛑 Stop Scanning" : "📷 Start Scanning"}
                 </Button>
                 <Button
                   onClick={() => {
@@ -466,11 +537,15 @@ export default function ScannerPage() {
                 </Button>
               </div>
               <div className="text-xs text-slate-400 space-y-1">
-                <div className="font-semibold">Troubleshooting:</div>
+                <div className="font-semibold">How to use:</div>
+                <div>• Click "Start Scanning" to begin automatic barcode detection</div>
+                <div>• Point camera at 4-digit barcodes (1001, 2001, 3001, etc.)</div>
+                <div>• Scanned barcodes will be automatically processed</div>
+                <div>• You can also manually enter barcodes below</div>
+                <div className="font-semibold mt-2">Troubleshooting:</div>
                 <div>• If camera shows black screen, try refreshing the page</div>
                 <div>• Ensure camera permissions are granted</div>
                 <div>• Make sure you're using HTTPS (required for camera access)</div>
-                <div>• Try using a different browser or device</div>
               </div>
             </CardContent>
           </Card>
@@ -481,7 +556,7 @@ export default function ScannerPage() {
           <CardHeader>
             <CardTitle className="text-slate-100">Scan Barcode</CardTitle>
             <CardDescription className="text-slate-400">
-              {userRole === "admin" ? "Scan student or admin barcodes" : "Scan student barcodes only"}
+              {userRole === "admin" ? "Use camera to scan or manually enter student/admin barcodes" : "Use camera to scan or manually enter student barcodes"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -547,7 +622,7 @@ export default function ScannerPage() {
                     onClick={startCamera}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    📷 Use Camera
+                    📷 Open Camera
                   </Button>
                 ) : cameraLoading ? (
                   <Button
