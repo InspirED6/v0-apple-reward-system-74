@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { BrowserMultiFormatReader } from "@zxing/library"
+import Quagga from "quagga"
 
 interface ScanResult {
   success: boolean
@@ -33,7 +33,7 @@ export default function ScannerPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [cameraLoading, setCameraLoading] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
-  const [codeReader, setCodeReader] = useState<BrowserMultiFormatReader | null>(null)
+  const [quaggaInitialized, setQuaggaInitialized] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -53,15 +53,14 @@ export default function ScannerPage() {
     setUserRole(storedRole)
   }, [router])
 
-  // Initialize barcode reader
+  // Initialize QuaggaJS
   useEffect(() => {
-    const reader = new BrowserMultiFormatReader()
-    setCodeReader(reader)
-    
     return () => {
-      reader.reset()
+      if (quaggaInitialized) {
+        Quagga.stop()
+      }
     }
-  }, [])
+  }, [quaggaInitialized])
 
   // Cleanup video stream on unmount
   useEffect(() => {
@@ -69,11 +68,11 @@ export default function ScannerPage() {
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
-      if (codeReader) {
-        codeReader.reset()
+      if (quaggaInitialized) {
+        Quagga.stop()
       }
     }
-  }, [videoStream, codeReader])
+  }, [videoStream, quaggaInitialized])
 
   // Add effect to handle video element updates
   useEffect(() => {
@@ -137,7 +136,7 @@ export default function ScannerPage() {
         // Add event listeners for debugging
         video.addEventListener('loadedmetadata', () => {
           console.log('Video metadata loaded:', video.videoWidth, 'x', video.videoHeight)
-          // Force video to play after metadata is loaded
+          setVideoReady(true)
           video.play().catch(console.error)
         })
         
@@ -170,37 +169,9 @@ export default function ScannerPage() {
         }, 500)
       }
 
-        // Check if video is actually playing
-        setTimeout(() => {
-          const video = videoRef.current
-          if (video) {
-            console.log('Video state:', {
-              paused: video.paused,
-              readyState: video.readyState,
-              videoWidth: video.videoWidth,
-              videoHeight: video.videoHeight,
-              srcObject: !!video.srcObject
-            })
-            
-            if (video.paused || video.readyState < 2) {
-              console.log('Video not ready, attempting to play again')
-              video.play().catch(console.error)
-            }
-            
-            // If video still not ready after 2 seconds, show warning
-            if (!videoReady && (video.paused || video.readyState < 2)) {
-              toast({
-                title: "Camera Display Issue",
-                description: "Camera is active but video may not be visible. You can still use manual entry below.",
-                variant: "destructive",
-              })
-            }
-          }
-        }, 2000)
-
       toast({
         title: "Camera Ready",
-        description: "Camera is ready. You can manually enter barcodes or use the camera for visual reference.",
+        description: "Camera is ready. Click 'Start Scanning' to scan barcodes automatically.",
       })
     } catch (error) {
       console.error("Camera error:", error)
@@ -236,7 +207,7 @@ export default function ScannerPage() {
   }
 
   const startBarcodeScanning = async () => {
-    if (!codeReader || !videoRef.current) return
+    if (!videoRef.current) return
 
     setIsScanning(true)
     toast({
@@ -245,15 +216,50 @@ export default function ScannerPage() {
     })
 
     try {
-      const result = await codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result, error) => {
-        if (result) {
-          const scannedCode = result.getText()
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: document.querySelector('#scanner-container'),
+          constraints: {
+            width: 640,
+            height: 480,
+            facingMode: "environment"
+          }
+        },
+        decoder: {
+          readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader", "i2of5_reader"]
+        },
+        locate: true,
+        locator: {
+          patchSize: "medium",
+          halfSample: true
+        }
+      }, (err) => {
+        if (err) {
+          console.error('Quagga initialization error:', err)
+          toast({
+            title: "Scanning Error",
+            description: "Failed to initialize barcode scanner. Please try again.",
+            variant: "destructive",
+          })
+          setIsScanning(false)
+          return
+        }
+        
+        setQuaggaInitialized(true)
+        Quagga.start()
+        
+        // Listen for successful scans
+        Quagga.onDetected((data) => {
+          const scannedCode = data.codeResult.code
           console.log('Barcode detected:', scannedCode)
           
           // Validate the scanned barcode format
           if (/^\d{4}$/.test(scannedCode)) {
             setBarcode(scannedCode)
             setIsScanning(false)
+            Quagga.stop()
             toast({
               title: "Barcode Scanned!",
               description: `Detected: ${scannedCode}. Click "Process Barcode" to continue.`,
@@ -269,10 +275,7 @@ export default function ScannerPage() {
               variant: "destructive",
             })
           }
-        }
-        if (error && !(error instanceof Error && error.name === 'NotFoundException')) {
-          console.error('Barcode scanning error:', error)
-        }
+        })
       })
     } catch (error) {
       console.error('Failed to start barcode scanning:', error)
@@ -286,8 +289,8 @@ export default function ScannerPage() {
   }
 
   const stopBarcodeScanning = () => {
-    if (codeReader) {
-      codeReader.reset()
+    if (quaggaInitialized) {
+      Quagga.stop()
     }
     setIsScanning(false)
   }
@@ -437,7 +440,7 @@ export default function ScannerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
+              <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
                 {cameraLoading ? (
                   <div className="flex items-center justify-center h-64">
                     <div className="text-center">
