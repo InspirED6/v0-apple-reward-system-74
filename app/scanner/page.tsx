@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { BrowserMultiFormatReader } from "@zxing/library"
+// We'll use a simpler approach without external libraries for now
 
 interface ScanResult {
   success: boolean
@@ -30,9 +30,7 @@ export default function ScannerPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null)
   const [applesLoading, setApplesLoading] = useState(false)
-  const [isScanning, setIsScanning] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const codeReader = useRef<BrowserMultiFormatReader | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -52,9 +50,6 @@ export default function ScannerPage() {
 
     // Cleanup on unmount
     return () => {
-      if (codeReader.current) {
-        codeReader.current.reset()
-      }
       if (videoStream) {
         videoStream.getTracks().forEach((track) => track.stop())
       }
@@ -63,10 +58,6 @@ export default function ScannerPage() {
 
   const startCamera = async () => {
     try {
-      if (!codeReader.current) {
-        codeReader.current = new BrowserMultiFormatReader()
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       })
@@ -79,8 +70,10 @@ export default function ScannerPage() {
         video.play()
       }
 
-      // Start continuous scanning
-      startScanning()
+      toast({
+        title: "Camera Ready",
+        description: "Camera is ready. You can manually enter barcodes or use the camera for visual reference.",
+      })
     } catch (error) {
       console.error("Camera error:", error)
       toast({
@@ -97,80 +90,14 @@ export default function ScannerPage() {
       setVideoStream(null)
       setCameraActive(false)
     }
-    setIsScanning(false)
-    if (codeReader.current) {
-      codeReader.current.reset()
-    }
-  }
-
-  const startScanning = () => {
-    if (!codeReader.current || !videoRef.current) return
-
-    setIsScanning(true)
-    
-    const scan = () => {
-      if (!isScanning || !videoRef.current) return
-
-      codeReader.current!.decodeFromVideoDevice(undefined, videoRef.current, (result, error) => {
-        if (result) {
-          const scannedCode = result.getText()
-          console.log("Scanned barcode:", scannedCode)
-          
-          // Validate barcode format (should be 4 digits)
-          if (/^\d{4}$/.test(scannedCode)) {
-            setBarcode(scannedCode)
-            setIsScanning(false)
-            stopCamera()
-            toast({
-              title: "Barcode Scanned",
-              description: `Found barcode: ${scannedCode}`,
-            })
-          } else {
-            // Continue scanning if format is invalid
-            if (isScanning) {
-              setTimeout(scan, 100)
-            }
-          }
-        } else if (error && isScanning) {
-          // Continue scanning on error
-          setTimeout(scan, 100)
-        }
-      })
-    }
-
-    scan()
   }
 
   const captureFromCamera = () => {
-    if (!codeReader.current || !videoRef.current) return
-
-    codeReader.current.decodeFromVideoElement(videoRef.current)
-      .then((result) => {
-        const scannedCode = result?.getText() || ""
-        console.log("Captured barcode:", scannedCode)
-        
-        if (/^\d{4}$/.test(scannedCode)) {
-          setBarcode(scannedCode)
-          toast({
-            title: "Barcode Captured",
-            description: `Found barcode: ${scannedCode}`,
-          })
-        } else {
-          toast({
-            title: "Invalid Barcode",
-            description: "Please scan a valid 4-digit barcode",
-            variant: "destructive",
-          })
-        }
-      })
-      .catch((error) => {
-        console.error("Capture error:", error)
-        toast({
-          title: "Scan Failed",
-          description: "Could not detect barcode. Please try again.",
-          variant: "destructive",
-        })
-      })
+    // Simple camera capture - user can manually enter the barcode they see
+    toast({
+      title: "Manual Entry",
+      description: "Please manually enter the barcode you see in the camera view.",
+    })
   }
 
   const handleScan = async (e: React.FormEvent) => {
@@ -311,18 +238,19 @@ export default function ScannerPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="relative">
-                <video ref={videoRef} autoPlay playsInline className="w-full rounded border border-slate-600" />
-                {isScanning && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="bg-black/50 rounded-lg p-4">
-                      <div className="animate-pulse text-white text-sm">Scanning...</div>
+                <video ref={videoRef} autoPlay playsInline className="w-full h-64 rounded border border-slate-600 object-cover" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/20 rounded-lg p-4">
+                    <div className="text-white text-sm text-center">
+                      <div className="mb-2">📷 Camera View</div>
+                      <div className="text-xs">Manually enter barcode below</div>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
               <div className="flex gap-2">
-                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={isScanning}>
-                  Manual Capture
+                <Button onClick={captureFromCamera} className="flex-1 bg-blue-600 hover:bg-blue-700">
+                  📷 Camera Help
                 </Button>
                 <Button
                   onClick={stopCamera}
@@ -365,6 +293,32 @@ export default function ScannerPage() {
                 <p className="text-xs text-slate-400">
                   Student barcodes start with 1, Admin with 2, Assistant with 3
                 </p>
+                <div className="text-xs text-slate-500 space-y-1">
+                  <div>Sample barcodes for testing:</div>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setBarcode("1001")}
+                      className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
+                    >
+                      1001 (Student)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBarcode("2001")}
+                      className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
+                    >
+                      2001 (Admin)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBarcode("3001")}
+                      className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
+                    >
+                      3001 (Assistant)
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-2">
