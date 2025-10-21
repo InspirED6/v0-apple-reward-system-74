@@ -158,48 +158,60 @@ export default function ScannerPage() {
     })
 
     try {
-      const reader = new BrowserMultiFormatReader()
+      const html5QrcodeScanner = new Html5QrcodeScanner(
+        "scanner-container",
+        {
+          fps: 12,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+          // Prefer environment camera and support 1D barcodes
+          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.ITF,
+          ],
+        },
+        false
+      )
 
-      // Prefer back/environment camera when available
-      let deviceId: string | undefined = undefined
-      try {
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices()
-        const preferred = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1]
-        deviceId = preferred?.deviceId
-      } catch {}
+      setScanner(html5QrcodeScanner)
 
-      const controlsPromise = reader.decodeFromVideoDevice(
-        deviceId,
-        videoRef.current,
-        (result, err, controls) => {
-          if (result) {
-            const decodedText = result.getText()
-            console.log('Barcode detected:', decodedText)
-
-            if (/^\d{4}$/.test(decodedText)) {
-              setBarcode(decodedText)
-              setIsScanning(false)
-              try { controls.stop() } catch {}
-              toast({
-                title: "Barcode Scanned!",
-                description: `Detected: ${decodedText}. Processing...`,
-              })
-              setTimeout(() => {
-                handleScan(null, { auto: true })
-              }, 200)
-            } else {
-              toast({
-                title: "Invalid Barcode",
-                description: "Scanned code must be 4 digits. Please try again.",
-                variant: "destructive",
-              })
-            }
-          } else if (err) {
-            // Ignore normal "no match" errors to avoid noise
-            const isNotFound = (err as any)?.name === 'NotFoundException' || (typeof err === 'string' && err.includes('NotFoundException'))
-            if (!isNotFound) {
-              console.error('Scanning error:', err)
-            }
+      html5QrcodeScanner.render(
+        (decodedText) => {
+          console.log('Barcode detected:', decodedText)
+          
+          // Validate the scanned barcode format
+          if (/^\d{4}$/.test(decodedText)) {
+            setBarcode(decodedText)
+            setIsScanning(false)
+            html5QrcodeScanner.clear()
+            toast({
+              title: "Barcode Scanned!",
+              description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
+            })
+            // Automatically process the scanned barcode
+            setTimeout(() => {
+              handleScan({ preventDefault: () => {} } as React.FormEvent)
+            }, 500)
+          } else {
+            toast({
+              title: "Invalid Barcode",
+              description: "Scanned code must be 4 digits. Please try again.",
+              variant: "destructive",
+            })
+          }
+        },
+        (error) => {
+          // This is called for every scan attempt, so we don't show errors for normal operation
+          // Only log actual errors, not normal "no barcode found" messages
+          if (error && !error.includes("NotFoundException")) {
+            console.error('Scanning error:', error)
           }
         }
       )
