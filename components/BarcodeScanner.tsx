@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from "html5-qrcode"
+import { useEffect, useRef, useState, useCallback } from "react"
 
 interface BarcodeScannerProps {
   onScanSuccess: (decodedText: string) => void
@@ -9,92 +8,123 @@ interface BarcodeScannerProps {
   isActive: boolean
 }
 
-export default function BarcodeScanner({ onScanSuccess, onScanError, isActive }: BarcodeScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
-  const [isInitialized, setIsInitialized] = useState(false)
+export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScannerProps) {
+  const [error, setError] = useState<string | null>(null)
+  const [isStarting, setIsStarting] = useState(false)
+  const html5QrcodeRef = useRef<any>(null)
+  const isRunningRef = useRef(false)
+
+  const stopScanner = useCallback(async () => {
+    if (html5QrcodeRef.current && isRunningRef.current) {
+      try {
+        await html5QrcodeRef.current.stop()
+        isRunningRef.current = false
+      } catch (e) {
+        console.warn("Error stopping scanner:", e)
+      }
+    }
+  }, [])
+
+  const startScanner = useCallback(async () => {
+    if (isRunningRef.current || isStarting) return
+    
+    setIsStarting(true)
+    setError(null)
+
+    try {
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode")
+      
+      if (!html5QrcodeRef.current) {
+        html5QrcodeRef.current = new Html5Qrcode("scanner-reader")
+      }
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 150 },
+        aspectRatio: 1.5,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.ITF,
+        ],
+      }
+
+      await html5QrcodeRef.current.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText: string) => {
+          console.log("Scanned:", decodedText)
+          onScanSuccess(decodedText)
+        },
+        () => {}
+      )
+      
+      isRunningRef.current = true
+    } catch (err: any) {
+      console.error("Scanner error:", err)
+      if (err?.message?.includes("Permission")) {
+        setError("Camera permission denied. Please allow camera access.")
+      } else if (err?.message?.includes("NotFoundError")) {
+        setError("No camera found on this device.")
+      } else {
+        setError("Failed to start camera. Please try again.")
+      }
+    } finally {
+      setIsStarting(false)
+    }
+  }, [onScanSuccess, isStarting])
 
   useEffect(() => {
-    if (!isActive) {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.clear()
-        } catch (e) {
-          console.warn("Error clearing scanner:", e)
-        }
-        scannerRef.current = null
-        setIsInitialized(false)
-      }
-      return
+    if (isActive) {
+      startScanner()
+    } else {
+      stopScanner()
     }
-
-    if (isInitialized) return
-
-    // Small delay to ensure the container is in the DOM
-    const initTimer = setTimeout(() => {
-      const container = document.getElementById("scanner-container")
-      if (!container) {
-        console.error("Scanner container not found")
-        return
-      }
-
-      try {
-        scannerRef.current = new Html5QrcodeScanner(
-          "scanner-container",
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-            formatsToSupport: [
-              Html5QrcodeSupportedFormats.QR_CODE,
-              Html5QrcodeSupportedFormats.EAN_13,
-              Html5QrcodeSupportedFormats.EAN_8,
-              Html5QrcodeSupportedFormats.UPC_A,
-              Html5QrcodeSupportedFormats.UPC_E,
-              Html5QrcodeSupportedFormats.CODE_128,
-              Html5QrcodeSupportedFormats.CODE_39,
-              Html5QrcodeSupportedFormats.ITF,
-            ],
-          },
-          /* verbose= */ false
-        )
-
-        scannerRef.current.render(
-          (decodedText: string) => {
-            console.log("Barcode detected:", decodedText)
-            onScanSuccess(decodedText)
-          },
-          (errorMessage: string) => {
-            // Ignore frequent scan failures/noise
-            if (onScanError) {
-              onScanError(errorMessage)
-            }
-          }
-        )
-
-        setIsInitialized(true)
-      } catch (error) {
-        console.error("Failed to initialize scanner:", error)
-      }
-    }, 200)
 
     return () => {
-      clearTimeout(initTimer)
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.clear()
-        } catch (e) {
-          console.warn("Error clearing scanner on unmount:", e)
-        }
-        scannerRef.current = null
-      }
+      stopScanner()
     }
-  }, [isActive, isInitialized, onScanSuccess, onScanError])
+  }, [isActive, startScanner, stopScanner])
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-slate-900 rounded-lg">
+        <div className="text-center p-4">
+          <div className="text-red-400 mb-2">Camera Error</div>
+          <div className="text-slate-400 text-sm">{error}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isStarting) {
+    return (
+      <div className="flex items-center justify-center h-64 bg-black rounded-lg">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <div className="text-white text-sm">Starting camera...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div 
-      id="scanner-container" 
-      className="relative bg-black rounded-lg overflow-hidden min-h-[300px]"
-    />
+    <div className="relative">
+      <div 
+        id="scanner-reader" 
+        className="rounded-lg overflow-hidden"
+        style={{ minHeight: "300px" }}
+      />
+      <div className="absolute bottom-2 left-0 right-0 text-center">
+        <span className="bg-black/50 text-white text-xs px-2 py-1 rounded">
+          Point camera at a 4-digit barcode
+        </span>
+      </div>
+    </div>
   )
 }
