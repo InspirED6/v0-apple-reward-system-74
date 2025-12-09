@@ -1,9 +1,18 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseClient } from "@/lib/db"
 
+const BASE_SESSION_VALUE = 150
+const SESSION_INCREMENT = 20
+const SESSIONS_PER_MILESTONE = 4
+
+function calculateSessionValue(completedSessions: number): number {
+  const milestones = Math.floor(completedSessions / SESSIONS_PER_MILESTONE)
+  return BASE_SESSION_VALUE + (milestones * SESSION_INCREMENT)
+}
+
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { apples, adminId } = await request.json()
+    const { apples, adminId, isSessionAttendance } = await request.json()
     const assistantId = params.id
 
     if (apples === undefined || apples === null) {
@@ -13,7 +22,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const supabase = getSupabaseClient()
     const { data: assistant, error } = await supabase
       .from("users")
-      .select("id, name, apples")
+      .select("id, name, apples, sessions_attended")
       .eq("id", assistantId)
       .eq("role", "assistant")
       .single()
@@ -23,72 +32,62 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     const currentApples = assistant.apples || 0
-    const newApples = Math.max(0, currentApples + apples)
+    const currentSessionsAttended = assistant.sessions_attended || 0
+    
+    let finalApples = currentApples
+    let actualApplesAdded = apples
+    let newSessionsAttended = currentSessionsAttended
+    let sessionValueInfo = ""
 
-    const currentSessions = Math.floor(currentApples / 150)
-    const newSessions = Math.floor(newApples / 150)
-
-    let finalApples = newApples
-    let loyaltyAdded = 0
-
-    if (newSessions >= 4) {
-      const currentBonusCount = Math.floor(currentSessions / 4)
-      const newBonusCount = Math.floor(newSessions / 4)
-
-      // Check if we've reached a new bonus milestone
-      if (newBonusCount > currentBonusCount) {
-        const bonusesToAdd = newBonusCount - currentBonusCount
-
-        for (let i = 0; i < bonusesToAdd; i++) {
-          const bonusLevel = currentBonusCount + i + 1
-          const bonusType = `session_${bonusLevel * 4}`
-
-          // Check if this specific bonus already exists
-          const { data: existingBonus } = await supabase
-            .from("loyalty_history")
-            .select("id")
-            .eq("user_id", assistantId)
-            .eq("bonus_type", bonusType)
-            .single()
-
-          if (!existingBonus) {
-            finalApples += 50
-            loyaltyAdded += 50
-
-            await supabase.from("loyalty_history").insert({
-              user_id: assistantId,
-              bonus_type: bonusType,
-              bonus_apples: 50,
-              created_at: new Date().toISOString(),
-            })
-          }
-        }
+    if (isSessionAttendance && apples > 0) {
+      const sessionValue = calculateSessionValue(currentSessionsAttended)
+      actualApplesAdded = sessionValue
+      finalApples = currentApples + sessionValue
+      newSessionsAttended = currentSessionsAttended + 1
+      
+      const nextMilestone = Math.ceil(newSessionsAttended / SESSIONS_PER_MILESTONE) * SESSIONS_PER_MILESTONE
+      const sessionsUntilNext = nextMilestone - newSessionsAttended
+      const nextSessionValue = calculateSessionValue(newSessionsAttended)
+      
+      sessionValueInfo = ` (Session value: ${sessionValue} apples)`
+      if (sessionsUntilNext > 0 && sessionsUntilNext < SESSIONS_PER_MILESTONE) {
+        sessionValueInfo += ` - ${sessionsUntilNext} more session${sessionsUntilNext > 1 ? 's' : ''} until value increases to ${nextSessionValue + SESSION_INCREMENT}!`
+      } else if (sessionsUntilNext === 0) {
+        sessionValueInfo += ` - Value increased! Next session worth ${nextSessionValue} apples!`
       }
+    } else {
+      finalApples = Math.max(0, currentApples + apples)
+    }
+
+    const updateData: { apples: number; sessions_attended?: number } = { apples: finalApples }
+    if (isSessionAttendance && apples > 0) {
+      updateData.sessions_attended = newSessionsAttended
     }
 
     const { data: updatedAssistant } = await supabase
       .from("users")
-      .update({ apples: finalApples })
+      .update(updateData)
       .eq("id", assistantId)
       .select()
       .single()
 
-    // Log transaction
     await supabase.from("apple_transactions").insert({
       user_id: assistantId,
       admin_id: adminId,
-      apples_added: apples,
+      apples_added: actualApplesAdded,
       reason: apples > 0 ? "Attendance bonus" : "Apple deduction",
     })
+
+    const currentSessionValue = calculateSessionValue(newSessionsAttended)
 
     return NextResponse.json({
       success: true,
       name: updatedAssistant?.name,
       apples: updatedAssistant?.apples,
-      applesAdded: apples,
-      sessions: Math.floor((updatedAssistant?.apples || 0) / 150),
-      loyaltyAdded: loyaltyAdded > 0 ? loyaltyAdded : undefined,
-      message: `${apples > 0 ? "Added" : "Subtracted"} ${Math.abs(apples)} apples (Session ${newSessions})${loyaltyAdded > 0 ? ` + ${loyaltyAdded} loyalty bonus!` : ""}`,
+      applesAdded: actualApplesAdded,
+      sessionsAttended: newSessionsAttended,
+      currentSessionValue: currentSessionValue,
+      message: `${apples > 0 ? "Added" : "Subtracted"} ${Math.abs(actualApplesAdded)} apples${sessionValueInfo}`,
     })
   } catch (error) {
     console.error("[v0] Add assistant apples error:", error)
