@@ -282,7 +282,7 @@ export default function ScannerPage() {
           if (data?.type === "student" && data?.studentId) {
             await handleAddApples(1, { type: "student", id: data.studentId })
           } else if (data?.type === "assistant" && data?.assistantId) {
-            await handleAddApples(150, { type: "assistant", id: data.assistantId })
+            await handleAddApples(150, { type: "assistant", id: data.assistantId }, true)
           }
         }
       } else {
@@ -305,7 +305,8 @@ export default function ScannerPage() {
 
   const handleAddApples = async (
     amount: number,
-    target?: { type: "student" | "assistant"; id: string }
+    target?: { type: "student" | "assistant"; id: string },
+    isSessionAttendance?: boolean
   ) => {
     if (!result && !target) return
 
@@ -320,13 +321,19 @@ export default function ScannerPage() {
           ? `/api/students/${effectiveId}/add-apples`
           : `/api/assistants/${effectiveId}/add-apples`
 
+      const bodyData: { apples: number; adminId: string | null; isSessionAttendance?: boolean } = {
+        apples: amount,
+        adminId: sessionStorage.getItem("userId"),
+      }
+      
+      if (effectiveType === "assistant" && isSessionAttendance) {
+        bodyData.isSessionAttendance = true
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apples: amount,
-          adminId: sessionStorage.getItem("userId"),
-        }),
+        body: JSON.stringify(bodyData),
       })
 
       const data = await response.json()
@@ -334,7 +341,7 @@ export default function ScannerPage() {
       if (response.ok) {
         toast({
           title: "Success",
-          description: `${amount > 0 ? "Added" : "Subtracted"} ${Math.abs(amount)} apples`,
+          description: data.message || `${amount > 0 ? "Added" : "Subtracted"} ${Math.abs(data.applesAdded || amount)} apples`,
         })
         if (result) {
           setResult({
@@ -599,11 +606,11 @@ export default function ScannerPage() {
                       <p className="text-sm text-slate-300 font-semibold">Manage Apples:</p>
                       <div className="grid grid-cols-2 gap-2">
                         <Button
-                          onClick={() => handleAddApples(150)}
+                          onClick={() => handleAddApples(150, undefined, true)}
                           disabled={applesLoading}
                           className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                         >
-                          ✓ Attend (+150)
+                          ✓ Attend Session
                         </Button>
                         <Button
                           onClick={() => handleAddApples(-10)}

@@ -1,6 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseClient } from "@/lib/db"
 
+const BASE_SESSION_VALUE = 150
+const SESSION_INCREMENT = 20
+const SESSIONS_PER_MILESTONE = 4
+
+function calculateSessionValue(completedSessions: number): number {
+  const milestones = Math.floor(completedSessions / SESSIONS_PER_MILESTONE)
+  return BASE_SESSION_VALUE + (milestones * SESSION_INCREMENT)
+}
+
 export async function GET(request: NextRequest, { params }: { params: { name: string } }) {
   const supabase = getSupabaseClient()
   try {
@@ -30,7 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
       } else {
         const { data: assistants, error } = await supabase
           .from("users")
-          .select("id, name, barcode, apples, role")
+          .select("id, name, barcode, apples, role, sessions_attended")
           .eq("role", "assistant")
           .order("apples", { ascending: false })
 
@@ -45,8 +54,9 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
               .select("bonus_type, bonus_apples")
               .eq("user_id", assistant.id)
 
-            const sessions = Math.floor((assistant.apples || 0) / 150)
-            const bonusCount = loyaltyHistory?.length || 0
+            const sessionsAttended = assistant.sessions_attended || 0
+            const currentSessionValue = calculateSessionValue(sessionsAttended)
+            const milestonesReached = Math.floor(sessionsAttended / SESSIONS_PER_MILESTONE)
 
             return {
               id: assistant.id,
@@ -54,8 +64,10 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
               barcode: assistant.barcode,
               apples: assistant.apples,
               role: assistant.role,
-              sessions: sessions,
-              bonusCount: bonusCount,
+              sessions: sessionsAttended,
+              currentSessionValue: currentSessionValue,
+              milestonesReached: milestonesReached,
+              bonusCount: loyaltyHistory?.length || 0,
               loyaltyHistory: loyaltyHistory || [],
             }
           }),
@@ -74,7 +86,7 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
 
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, name, barcode, apples")
+      .select("id, name, barcode, apples, sessions_attended")
       .eq("role", role)
       .eq("name", name)
       .single()
@@ -83,7 +95,9 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
       return NextResponse.json({ message: "User not found" }, { status: 404 })
     }
 
-    const sessions = Math.floor((user.apples || 0) / 150)
+    const sessionsAttended = user.sessions_attended || 0
+    const currentSessionValue = calculateSessionValue(sessionsAttended)
+    const milestonesReached = Math.floor(sessionsAttended / SESSIONS_PER_MILESTONE)
 
     const { data: loyaltyHistory } = await supabase
       .from("loyalty_history")
@@ -91,15 +105,15 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
 
-    const bonusCount = loyaltyHistory?.length || 0
-
     return NextResponse.json({
       isAdmin: false,
       name: user.name,
       barcode: user.barcode,
       apples: user.apples,
-      sessions: sessions,
-      bonusCount: bonusCount,
+      sessions: sessionsAttended,
+      currentSessionValue: currentSessionValue,
+      milestonesReached: milestonesReached,
+      bonusCount: loyaltyHistory?.length || 0,
       loyaltyHistory: loyaltyHistory || [],
     })
   } catch (error) {

@@ -14,6 +14,8 @@ interface AssistantData {
   apples: number
   role: string
   sessions: number
+  currentSessionValue: number
+  milestonesReached: number
   bonusCount: number
   loyaltyHistory: Array<{ bonus_type: string; bonus_apples: number }>
 }
@@ -30,6 +32,8 @@ interface DashboardData {
   barcode: string
   apples: number
   sessions: number
+  currentSessionValue: number
+  milestonesReached: number
   loyaltyHistory: Array<{ bonus_type: string; bonus_apples: number; created_at: string }>
 }
 
@@ -251,23 +255,14 @@ export default function Dashboard({ params }: { params: { name: string } }) {
                           <p className="text-lg font-bold text-blue-400">{item.sessions}</p>
                         </div>
                         <div className="bg-slate-700/50 p-2 rounded">
-                          <p className="text-xs text-slate-400">Bonuses</p>
-                          <p className="text-lg font-bold text-orange-400">{item.bonusCount}</p>
+                          <p className="text-xs text-slate-400">Session Value</p>
+                          <p className="text-lg font-bold text-orange-400">{item.currentSessionValue}</p>
                         </div>
                       </div>
-                      {item.loyaltyHistory.length > 0 && (
-                        <div className="bg-slate-700/30 p-2 rounded text-xs text-slate-300">
-                          <p className="font-semibold mb-1">Recent Bonuses:</p>
-                          <div className="space-y-1">
-                            {item.loyaltyHistory.slice(0, 3).map((history, idx) => (
-                              <div key={idx} className="flex justify-between">
-                                <span>{history.bonus_type}:</span>
-                                <span className="text-orange-400">+{history.bonus_apples}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      <div className="bg-slate-700/30 p-2 rounded text-xs text-slate-300">
+                        <p className="font-semibold">Next session: {item.currentSessionValue} apples</p>
+                        <p className="text-slate-400">Milestones reached: {item.milestonesReached}</p>
+                      </div>
                     </>
                   )}
                 </CardContent>
@@ -361,20 +356,22 @@ export default function Dashboard({ params }: { params: { name: string } }) {
           </Card>
         </div>
 
-        {/* Loyalty Bonus Info */}
+        {/* Session Value Info */}
         <Card className="mb-6 border-orange-500/50 bg-slate-800/50">
           <CardHeader>
-            <CardTitle className="text-orange-400">Loyalty Bonus Info</CardTitle>
+            <CardTitle className="text-orange-400">Session Value Progress</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-300">
-            <p className="mb-2">Reach 4 sessions (600 apples) to earn a 50 apple bonus automatically!</p>
-            <p className="text-xs text-slate-400">Current sessions: {sessions} / 4</p>
+            <p className="mb-2 text-lg">Current session value: <span className="text-emerald-400 font-bold">{userData.currentSessionValue || 150}</span> apples</p>
+            <p className="mb-2">Every 4 sessions, your session value increases by 20 apples!</p>
+            <p className="text-xs text-slate-400">Sessions attended: {sessions} (Milestones: {userData.milestonesReached || 0})</p>
             <div className="mt-3 bg-slate-700/50 rounded-full h-2 overflow-hidden">
               <div
                 className="bg-gradient-to-r from-green-500 to-emerald-600 h-full transition-all"
-                style={{ width: `${Math.min((sessions / 4) * 100, 100)}%` }}
+                style={{ width: `${Math.min(((sessions % 4) / 4) * 100, 100)}%` }}
               />
             </div>
+            <p className="text-xs text-slate-400 mt-1">{4 - (sessions % 4)} more sessions until next milestone (+20 to session value)</p>
           </CardContent>
         </Card>
 
