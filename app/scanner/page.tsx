@@ -1,15 +1,26 @@
 "use client"
 
 import type React from "react"
-
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import dynamic from "next/dynamic"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from "html5-qrcode"
+
+const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-64 bg-black rounded-lg">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <div className="text-white text-sm">Loading scanner...</div>
+      </div>
+    </div>
+  ),
+})
 
 interface ScanResult {
   success: boolean
@@ -30,15 +41,10 @@ export default function ScannerPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [applesLoading, setApplesLoading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
-  const [cameraLoading, setCameraLoading] = useState(false)
-  const [videoReady, setVideoReady] = useState(false)
-  const [autoStarted, setAutoStarted] = useState(false)
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
   useEffect(() => {
-    // Get user info from session storage
     const userId = sessionStorage.getItem("userId")
     const storedName = sessionStorage.getItem("userName")
     const storedRole = sessionStorage.getItem("userRole")
@@ -52,190 +58,45 @@ export default function ScannerPage() {
     setUserRole(storedRole)
   }, [router])
 
-  // Auto-start camera and scanning best-effort on first load
-  useEffect(() => {
-    if (autoStarted) return
-    ;(async () => {
-      try {
-        await startCamera()
-        setAutoStarted(true)
-        await startBarcodeScanning()
-      } catch {
-        // Ignore failures; user can manually start
-        setAutoStarted(true)
-      }
-    })()
-  }, [autoStarted])
+  const handleScanSuccess = (decodedText: string) => {
+    console.log("Barcode detected:", decodedText)
 
-  // Cleanup scanner on unmount
-  useEffect(() => {
-    return () => {
-      if (scannerRef.current) {
-        try { scannerRef.current.clear() } catch {}
-      }
-    }
-  }, [])
-
-
-  const startCamera = async () => {
-    setCameraLoading(true)
-    try {
-      // Check if getUserMedia is supported
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Camera not supported on this device")
-      }
-
-      // Test camera access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: "environment",
-          width: { ideal: 640, min: 320 },
-          height: { ideal: 480, min: 240 }
-        },
-        audio: false
-      })
-      
-      // Stop the test stream
-      stream.getTracks().forEach(track => track.stop())
-      
-      setCameraActive(true)
+    if (/^\d{4}$/.test(decodedText)) {
+      setBarcode(decodedText)
       setIsScanning(false)
-      setCameraLoading(false)
-
+      setCameraActive(false)
       toast({
-        title: "Camera Ready",
-        description: "Camera is ready. Click 'Start Scanning' to scan barcodes automatically.",
+        title: "Barcode Scanned!",
+        description: `Detected: ${decodedText}. Processing...`,
       })
-    } catch (error) {
-      console.error("Camera error:", error)
-      setCameraLoading(false)
-      
-      let errorMessage = "Unable to access camera. Please check permissions."
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          errorMessage = "Camera permission denied. Please allow camera access and try again."
-        } else if (error.name === 'NotFoundError') {
-          errorMessage = "No camera found on this device."
-        } else if (error.name === 'NotSupportedError') {
-          errorMessage = "Camera not supported on this device or browser."
-        }
-      }
-      
+      setTimeout(() => {
+        processBarcode(decodedText)
+      }, 500)
+    } else {
       toast({
-        title: "Camera Error",
-        description: errorMessage,
+        title: "Invalid Barcode",
+        description: "Scanned code must be 4 digits. Please try again.",
         variant: "destructive",
       })
     }
   }
 
-  const stopCamera = () => {
-    if (scannerRef.current) {
-      try { scannerRef.current.clear() } catch {}
-      scannerRef.current = null
-    }
-    setCameraActive(false)
-    setIsScanning(false)
-    setVideoReady(false)
-  }
-
-  const startBarcodeScanning = async () => {
+  const startScanning = () => {
+    setCameraActive(true)
     setIsScanning(true)
     toast({
-      title: "Scanning Started",
+      title: "Scanner Started",
       description: "Point the camera at a barcode to scan automatically.",
     })
-
-    try {
-      // Ensure container exists (in case state hasn't rendered yet)
-      if (!document.getElementById("scanner-container")) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
-      }
-
-      scannerRef.current = new Html5QrcodeScanner(
-        "scanner-container",
-        {
-          fps: 12,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          // Prefer environment camera and support 1D barcodes
-          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.ITF,
-          ],
-        }
-      )
-
-      scannerRef.current.render(
-        (decodedText) => {
-          console.log('Barcode detected:', decodedText)
-
-          // Validate the scanned barcode format
-          if (/^\d{4}$/.test(decodedText)) {
-            setBarcode(decodedText)
-            setIsScanning(false)
-            try { scannerRef.current?.clear() } catch {}
-            toast({
-              title: "Barcode Scanned!",
-              description: `Detected: ${decodedText}. Click "Process Barcode" to continue.`,
-            })
-            // Automatically process the scanned barcode
-            setTimeout(() => {
-              handleScan({ preventDefault: () => {} } as React.FormEvent, { auto: true })
-            }, 500)
-          } else {
-            toast({
-              title: "Invalid Barcode",
-              description: "Scanned code must be 4 digits. Please try again.",
-              variant: "destructive",
-            })
-          }
-        },
-        (_errorMessage) => {
-          // Ignore frequent scan failures/noise
-        }
-      )
-    } catch (error) {
-      console.error("Failed to start barcode scanning:", error)
-      toast({
-        title: "Scanning Error",
-        description: "Failed to start barcode scanning. Please try again.",
-        variant: "destructive",
-      })
-      setIsScanning(false)
-    }
   }
 
-  const stopBarcodeScanning = () => {
-    if (scannerRef.current) {
-      try { scannerRef.current.clear() } catch {}
-      scannerRef.current = null
-    }
+  const stopScanning = () => {
+    setCameraActive(false)
     setIsScanning(false)
   }
 
-  const captureFromCamera = () => {
-    if (isScanning) {
-      stopBarcodeScanning()
-    } else {
-      startBarcodeScanning()
-    }
-  }
-
-  const handleScan = async (
-    e: React.FormEvent | null,
-    options?: { auto?: boolean }
-  ) => {
-    if (e) e.preventDefault()
-
-    if (!barcode.trim()) {
+  const processBarcode = async (code: string) => {
+    if (!code.trim()) {
       toast({
         title: "Error",
         description: "Please enter or scan a barcode",
@@ -244,8 +105,7 @@ export default function ScannerPage() {
       return
     }
 
-    // Validate barcode format (should be 4 digits)
-    if (!/^\d{4}$/.test(barcode.trim())) {
+    if (!/^\d{4}$/.test(code.trim())) {
       toast({
         title: "Invalid Barcode Format",
         description: "Barcode must be exactly 4 digits (e.g., 1001, 2001, 3001)",
@@ -262,7 +122,7 @@ export default function ScannerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          barcode: barcode.trim(),
+          barcode: code.trim(),
           userId: sessionStorage.getItem("userId"),
           userRole: userRole,
         }),
@@ -277,13 +137,10 @@ export default function ScannerPage() {
           description: data.message,
         })
         setBarcode("")
-        // Auto-award apples on successful scan when triggered by camera
-        if (options?.auto) {
-          if (data?.type === "student" && data?.studentId) {
-            await handleAddApples(1, { type: "student", id: data.studentId })
-          } else if (data?.type === "assistant" && data?.assistantId) {
-            await handleAddApples(150, { type: "assistant", id: data.assistantId }, true)
-          }
+        if (data?.type === "student" && data?.studentId) {
+          await handleAddApples(1, { type: "student", id: data.studentId })
+        } else if (data?.type === "assistant" && data?.assistantId) {
+          await handleAddApples(150, { type: "assistant", id: data.assistantId }, true)
         }
       } else {
         toast({
@@ -301,6 +158,11 @@ export default function ScannerPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleScan = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await processBarcode(barcode)
   }
 
   const handleAddApples = async (
@@ -325,7 +187,7 @@ export default function ScannerPage() {
         apples: amount,
         adminId: sessionStorage.getItem("userId"),
       }
-      
+
       if (effectiveType === "assistant" && isSessionAttendance) {
         bodyData.isSessionAttendance = true
       }
@@ -370,7 +232,6 @@ export default function ScannerPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
       <div className="max-w-2xl mx-auto pt-4">
-        {/* Header */}
         <div className="text-center mb-6">
           <div className="flex justify-center gap-2 mb-4">
             <span className="text-4xl">🍎</span>
@@ -383,79 +244,38 @@ export default function ScannerPage() {
           </p>
         </div>
 
-        {/* Camera Section */}
-        {(cameraActive || cameraLoading) && (
+        {cameraActive && (
           <Card className="mb-6 border-slate-700 bg-slate-800/50">
             <CardHeader>
               <CardTitle className="text-slate-100">Camera View</CardTitle>
               <CardDescription className="text-slate-400">
-                {cameraLoading ? "Starting camera..." : isScanning ? "Point camera at barcode to scan automatically" : "Camera ready - click 'Start Scanning' to scan barcodes"}
+                {isScanning ? "Point camera at barcode to scan automatically" : "Camera ready"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div id="scanner-container" className="relative bg-black rounded-lg overflow-hidden min-h-[256px] flex items-center justify-center">
-                {!cameraLoading && (
-                  <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs pointer-events-none">
-                    {isScanning ? (
-                      <div className="text-green-300">Point camera at a 4-digit barcode</div>
-                    ) : (
-                      <div className="text-slate-300">Click 'Start Scanning' to scan barcodes</div>
-                    )}
-                  </div>
-                )}
-                {cameraLoading && (
-                  <div className="flex items-center justify-center h-64">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                      <div className="text-white text-sm">Starting camera...</div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <BarcodeScanner
+                onScanSuccess={handleScanSuccess}
+                isActive={isScanning}
+              />
               <div className="flex gap-2">
-                <Button 
-                  onClick={captureFromCamera} 
-                  className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  disabled={cameraLoading}
-                >
-                  {isScanning ? "🛑 Stop Scanning" : "📷 Start Scanning"}
-                </Button>
                 <Button
-                  onClick={() => {
-                    stopCamera()
-                    setTimeout(() => startCamera(), 100)
-                  }}
-                  variant="outline"
-                  className="flex-1 border-yellow-600 text-yellow-400 hover:bg-yellow-500/10"
-                  disabled={cameraLoading}
-                >
-                  🔄 Refresh Camera
-                </Button>
-                <Button
-                  onClick={stopCamera}
+                  onClick={stopScanning}
                   variant="outline"
                   className="flex-1 border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"
-                  disabled={cameraLoading}
                 >
-                  Close Camera
+                  Close Scanner
                 </Button>
               </div>
               <div className="text-xs text-slate-400 space-y-1">
                 <div className="font-semibold">How to use:</div>
-                <div>• Click "Start Scanning" to begin automatic barcode detection</div>
-                <div>• Point camera at 4-digit barcodes (1001, 2001, 3001, etc.)</div>
-                <div>• Scanned barcodes will be automatically processed</div>
-                <div>• You can also manually enter barcodes below</div>
-                <div className="font-semibold mt-2">Troubleshooting:</div>
-                <div>• If camera shows black screen, try refreshing the page</div>
-                <div>• Ensure camera permissions are granted</div>
-                <div>• Make sure you're using HTTPS (required for camera access)</div>
+                <div>Point camera at 4-digit barcodes (1001, 2001, 3001, etc.)</div>
+                <div>Scanned barcodes will be automatically processed</div>
+                <div>You can also manually enter barcodes below</div>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Scanner Input */}
         <Card className="mb-6 border-slate-700 bg-slate-800/50 backdrop-blur">
           <CardHeader>
             <CardTitle className="text-slate-100">Scan Barcode</CardTitle>
@@ -472,8 +292,7 @@ export default function ScannerPage() {
                   placeholder="Enter 4-digit barcode (e.g., 1001, 2001, 3001)..."
                   value={barcode}
                   onChange={(e) => {
-                    // Only allow digits and limit to 4 characters
-                    const value = e.target.value.replace(/\D/g, '').slice(0, 4)
+                    const value = e.target.value.replace(/\D/g, "").slice(0, 4)
                     setBarcode(value)
                   }}
                   className="bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400"
@@ -520,30 +339,20 @@ export default function ScannerPage() {
                 >
                   {loading ? "Processing..." : "Process Barcode"}
                 </Button>
-                {!cameraActive && !cameraLoading ? (
+                {!cameraActive && (
                   <Button
                     type="button"
-                    onClick={async () => { await startCamera(); await startBarcodeScanning() }}
+                    onClick={startScanning}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >
                     📷 Open Camera
                   </Button>
-                ) : cameraLoading ? (
-                  <Button
-                    type="button"
-                    disabled
-                    className="flex-1 bg-blue-600/50 text-white"
-                  >
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Starting Camera...
-                  </Button>
-                ) : null}
+                )}
               </div>
             </form>
           </CardContent>
         </Card>
 
-        {/* Result */}
         {result && (
           <Card
             className={`mb-6 border-2 ${
@@ -628,26 +437,13 @@ export default function ScannerPage() {
           </Card>
         )}
 
-        {/* Navigation */}
-        <div className="flex gap-2">
-          <Link href={`/dashboard/${userName}?role=${userRole}`} className="flex-1">
-            <Button
-              variant="outline"
-              className="w-full border-slate-600 text-slate-100 hover:bg-slate-700 bg-transparent"
-            >
-              View Dashboard
-            </Button>
+        <div className="flex justify-center gap-4 mt-8">
+          <Link href="/" className="text-slate-400 hover:text-slate-200 text-sm">
+            ← Back to Home
           </Link>
-          <Button
-            onClick={() => {
-              sessionStorage.clear()
-              router.push("/login")
-            }}
-            variant="outline"
-            className="flex-1 border-red-600 text-red-400 hover:bg-red-500/10"
-          >
-            Logout
-          </Button>
+          <Link href="/login" className="text-slate-400 hover:text-slate-200 text-sm">
+            Login Page
+          </Link>
         </div>
       </div>
     </main>
