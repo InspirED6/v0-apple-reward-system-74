@@ -13,6 +13,7 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
   const [isStarting, setIsStarting] = useState(false)
   const html5QrcodeRef = useRef<any>(null)
   const isRunningRef = useRef(false)
+  const retryCountRef = useRef(0)
 
   const stopScanner = useCallback(async () => {
     if (html5QrcodeRef.current && isRunningRef.current) {
@@ -34,14 +35,23 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode")
       
-      if (!html5QrcodeRef.current) {
-        html5QrcodeRef.current = new Html5Qrcode("scanner-reader")
+      // Clean up any existing instance
+      if (html5QrcodeRef.current && isRunningRef.current) {
+        try {
+          await html5QrcodeRef.current.stop()
+          await html5QrcodeRef.current.clear()
+        } catch (e) {
+          console.warn("Error clearing previous scanner:", e)
+        }
       }
+      
+      html5QrcodeRef.current = new Html5Qrcode("scanner-reader")
 
       const config = {
         fps: 10,
         qrbox: { width: 250, height: 150 },
         aspectRatio: 1.5,
+        disableFlip: false,
         formatsToSupport: [
           Html5QrcodeSupportedFormats.QR_CODE,
           Html5QrcodeSupportedFormats.EAN_13,
@@ -54,25 +64,54 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
         ],
       }
 
-      await html5QrcodeRef.current.start(
-        { facingMode: "environment" },
-        config,
-        (decodedText: string) => {
-          console.log("Scanned:", decodedText)
-          onScanSuccess(decodedText)
-        },
-        () => {}
-      )
+      // Try with environment camera first, then fallback to any camera
+      let cameraConstraints: any = { facingMode: "environment" }
+      
+      try {
+        await html5QrcodeRef.current.start(
+          cameraConstraints,
+          config,
+          (decodedText: string) => {
+            console.log("Scanned:", decodedText)
+            onScanSuccess(decodedText)
+          },
+          () => {}
+        )
+      } catch (err: any) {
+        // If environment mode fails, try without facingMode constraint
+        if (err?.toString?.().includes("NotFoundError") || err?.toString?.().includes("ConstraintError")) {
+          console.log("Environment camera not available, trying without constraint...")
+          cameraConstraints = { deviceId: { ideal: [] } }
+          await html5QrcodeRef.current.start(
+            cameraConstraints,
+            config,
+            (decodedText: string) => {
+              console.log("Scanned:", decodedText)
+              onScanSuccess(decodedText)
+            },
+            () => {}
+          )
+        } else {
+          throw err
+        }
+      }
       
       isRunningRef.current = true
+      retryCountRef.current = 0
     } catch (err: any) {
       console.error("Scanner error:", err)
-      if (err?.message?.includes("Permission")) {
-        setError("Camera permission denied. Please allow camera access.")
-      } else if (err?.message?.includes("NotFoundError")) {
+      const errorStr = err?.toString?.() || JSON.stringify(err)
+      
+      if (errorStr.includes("Permission") || errorStr.includes("denied")) {
+        setError("Camera permission denied. Please enable camera access in your browser settings and try again.")
+      } else if (errorStr.includes("NotFoundError")) {
         setError("No camera found on this device.")
+      } else if (errorStr.includes("NotAllowedError")) {
+        setError("Camera permission required. Please grant camera access when prompted.")
+      } else if (errorStr.includes("NotReadableError")) {
+        setError("Camera is in use by another application. Please close it and try again.")
       } else {
-        setError("Failed to start camera. Please try again.")
+        setError(`Failed to start camera: ${err?.message || "Unknown error"}. Please try again.`)
       }
     } finally {
       setIsStarting(false)
