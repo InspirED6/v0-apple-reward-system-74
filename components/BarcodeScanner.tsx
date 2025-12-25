@@ -11,88 +11,117 @@ interface BarcodeScannerProps {
 export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScannerProps) {
   const [error, setError] = useState<string | null>(null)
   const [isStarting, setIsStarting] = useState(false)
-  const html5QrcodeRef = useRef<any>(null)
+  const quaggaRef = useRef<any>(null)
   const isRunningRef = useRef(false)
-  const scannedRef = useRef(false)
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
-    let isMounted = true
+    isMountedRef.current = true
 
-    const startCamera = async () => {
-      if (!isMounted || isRunningRef.current || isStarting) return
+    const initScanner = async () => {
+      if (!isMountedRef.current || isRunningRef.current) return
 
       setIsStarting(true)
       setError(null)
 
       try {
-        // Dynamic import to ensure client-side only
-        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode")
+        const Quagga = await import("quagga").then((m) => m.default)
 
-        // Check if scanner element exists
-        const scannerElement = document.getElementById("scanner-reader")
-        if (!scannerElement) {
-          throw new Error("Scanner container not found")
+        // Stop any existing scanner
+        if (isRunningRef.current) {
+          try {
+            Quagga.stop()
+          } catch (e) {
+            console.warn("Error stopping previous scanner:", e)
+          }
+          isRunningRef.current = false
         }
 
-        // Clean up previous instance if it exists
-        if (html5QrcodeRef.current) {
-          try {
-            if (isRunningRef.current) {
-              await html5QrcodeRef.current.stop()
+        // Initialize Quagga
+        await new Promise<void>((resolve, reject) => {
+          Quagga.init(
+            {
+              inputStream: {
+                type: "LiveStream",
+                constraints: {
+                  width: { min: 640 },
+                  height: { min: 480 },
+                  facingMode: "environment",
+                },
+                target: "#scanner-reader",
+              },
+              decoder: {
+                workers: 2,
+                debug: false,
+              },
+              locator: {
+                patchSize: "medium",
+                halfSample: true,
+              },
+              numOfWorkers: 2,
+              frequency: 10,
+            },
+            (err: any) => {
+              if (err) {
+                console.error("Quagga init error:", err)
+                reject(new Error(`Failed to initialize scanner: ${err?.message || err}`))
+              } else {
+                console.log("Quagga initialized successfully")
+                resolve()
+              }
             }
-            html5QrcodeRef.current.clear()
-          } catch (e) {
-            console.warn("Error cleaning up previous scanner:", e)
+          )
+        })
+
+        // Start the scanner
+        Quagga.start()
+        console.log("Quagga started")
+
+        // Set up detection handler
+        const detectionHandler = (result: any) => {
+          if (result && result.codeResult && result.codeResult.code) {
+            const code = result.codeResult.code
+            console.log("Barcode detected:", code)
+
+            // Validate barcode format
+            if (/^\d{4}$/.test(code) || code.length > 0) {
+              onScanSuccess(code)
+              // Stop after detection
+              try {
+                Quagga.stop()
+                isRunningRef.current = false
+              } catch (e) {
+                console.warn("Error stopping scanner:", e)
+              }
+            }
           }
         }
 
-        // Create new scanner instance
-        html5QrcodeRef.current = new Html5Qrcode("scanner-reader")
+        Quagga.onDetected(detectionHandler)
+        quaggaRef.current = { Quagga, detectionHandler }
+        isRunningRef.current = true
 
-        const config = {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-          disableFlip: false,
-        }
-
-        // Start with rear camera
-        const cameraConstraints = { facingMode: "environment" }
-
-        await html5QrcodeRef.current.start(
-          cameraConstraints,
-          config,
-          (decodedText: string) => {
-            if (!scannedRef.current) {
-              scannedRef.current = true
-              console.log("Barcode detected:", decodedText)
-              onScanSuccess(decodedText)
-            }
-          },
-          () => {} // No error handler for scanning errors
-        )
-
-        if (isMounted) {
-          isRunningRef.current = true
+        if (isMountedRef.current) {
           setIsStarting(false)
         }
       } catch (err: any) {
-        console.error("Scanner error:", err)
-        
-        if (!isMounted) return
+        console.error("Scanner initialization error:", err)
+
+        if (!isMountedRef.current) return
 
         const errorMsg = err?.message || err?.toString?.() || "Unknown error"
         let userMessage = "Failed to start camera. Please try again."
 
         if (errorMsg.includes("Permission") || errorMsg.includes("denied")) {
           userMessage = "Camera permission denied. Please grant camera access."
-        } else if (errorMsg.includes("NotFoundError")) {
+        } else if (errorMsg.includes("NotFoundError") || errorMsg.includes("not find")) {
           userMessage = "No camera found on this device."
         } else if (errorMsg.includes("NotAllowedError")) {
-          userMessage = "Camera access not allowed. Please check your browser permissions."
+          userMessage = "Camera access not allowed. Please check browser permissions."
         } else if (errorMsg.includes("NotReadableError")) {
-          userMessage = "Camera is in use. Please close other apps using the camera."
-        } else if (errorMsg.includes("not found")) {
-          userMessage = "Scanner element not found. Please refresh the page."
+          userMessage = "Camera is in use. Close other apps using the camera."
+        } else if (errorMsg.includes("video")) {
+          userMessage = "Could not access video stream. Check camera permissions."
         }
 
         setError(userMessage)
@@ -100,12 +129,14 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
       }
     }
 
-    const stopCamera = async () => {
-      if (html5QrcodeRef.current && isRunningRef.current) {
+    const stopScanner = async () => {
+      if (isRunningRef.current && quaggaRef.current?.Quagga) {
         try {
-          await html5QrcodeRef.current.stop()
+          const { Quagga, detectionHandler } = quaggaRef.current
+          Quagga.offDetected()
+          Quagga.stop()
           isRunningRef.current = false
-          scannedRef.current = false
+          console.log("Scanner stopped")
         } catch (e) {
           console.warn("Error stopping scanner:", e)
         }
@@ -113,13 +144,14 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
     }
 
     if (isActive) {
-      startCamera()
+      initScanner()
     } else {
-      stopCamera()
+      stopScanner()
     }
 
     return () => {
-      isMounted = false
+      isMountedRef.current = false
+      stopScanner()
     }
   }, [isActive, onScanSuccess])
 
@@ -139,7 +171,7 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
       <div className="flex items-center justify-center h-64 bg-slate-950 rounded-lg">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <div className="text-white text-sm">Starting camera...</div>
+          <div className="text-white text-sm">Initializing scanner...</div>
         </div>
       </div>
     )
@@ -147,15 +179,9 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
 
   return (
     <div className="relative w-full">
-      <div
-        id="scanner-reader"
-        className="rounded-lg overflow-hidden bg-black w-full"
-        style={{ minHeight: "300px" }}
-      />
+      <div id="scanner-reader" className="rounded-lg overflow-hidden bg-black w-full" style={{ minHeight: "300px" }} />
       <div className="absolute bottom-2 left-0 right-0 text-center">
-        <span className="bg-black/50 text-white text-xs px-2 py-1 rounded">
-          Point camera at barcode
-        </span>
+        <span className="bg-black/50 text-white text-xs px-2 py-1 rounded">Point camera at barcode</span>
       </div>
     </div>
   )
