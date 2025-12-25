@@ -18,6 +18,7 @@ interface AssistantData {
   milestonesReached: number
   bonusCount: number
   loyaltyHistory: Array<{ bonus_type: string; bonus_apples: number }>
+  profilePictureUrl?: string
 }
 
 interface StudentData {
@@ -236,8 +237,17 @@ export default function Dashboard({ params }: { params: { name: string } }) {
             {data.map((item) => (
               <Card
                 key={item.id}
-                className="border-slate-700 bg-slate-800/50 hover:border-emerald-500/50 transition-colors"
+                className="border-slate-700 bg-slate-800/50 hover:border-emerald-500/50 transition-colors overflow-hidden"
               >
+                {item.profilePictureUrl && (
+                  <div className="w-full h-32 bg-slate-700 overflow-hidden">
+                    <img
+                      src={item.profilePictureUrl}
+                      alt={item.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
                 <CardHeader className="pb-3">
                   <CardTitle className="text-emerald-400 text-lg">{item.name}</CardTitle>
                   <CardDescription className="text-slate-400 text-xs">ID: {item.barcode}</CardDescription>
