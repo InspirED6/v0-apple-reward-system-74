@@ -11,9 +11,9 @@ export async function POST(request: NextRequest) {
     }
 
     const barcodeType = barcode.charAt(0)
-    const isStudent = barcodeType === "1"
-    const isAdmin = barcodeType === "2"
-    const isAssistant = barcodeType === "3"
+    const isStudent = barcodeType === "3"
+    const isAssistant = barcodeType === "2"
+    const isAdmin = barcodeType === "1"
 
     if (userRole === "admin") {
       if (isAdmin) {
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
         })
       } else {
         return NextResponse.json(
-          { message: "Admins can scan their own attendance (2), student barcodes (1), or assistant barcodes (3)" },
+          { message: "Admins can scan their own attendance (1), student barcodes (3), or assistant barcodes (2)" },
           { status: 403 },
         )
       }
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     if (userRole === "assistant") {
       if (!isStudent) {
         return NextResponse.json(
-          { message: "Assistants can only scan student barcodes (starting with 1)" },
+          { message: "Assistants can only scan student barcodes (starting with 3)" },
           { status: 403 },
         )
       }

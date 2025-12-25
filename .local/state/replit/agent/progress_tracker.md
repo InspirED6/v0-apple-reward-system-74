@@ -7,3 +7,4 @@
 [x] 7. Rewrote BarcodeScanner component with improved camera initialization and error handling
 [x] 8. Replaced html5-qrcode with QuaggaJS and created TypeScript type definitions
 [x] 9. Improved barcode detection flow - now processes detected barcodes properly with better logging
+[x] 10. Updated barcode format to 6 digits with role prefixes: 3=student, 2=assistant, 1=admin

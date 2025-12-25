@@ -63,15 +63,17 @@ export default function ScannerPage() {
 
     const trimmedCode = decodedText.trim()
 
-    if (/^\d{4}$/.test(trimmedCode)) {
+    if (/^[123]\d{5}$/.test(trimmedCode)) {
       setBarcode(trimmedCode)
       setIsScanning(false)
       setCameraActive(false)
+      const prefix = trimmedCode[0]
+      const roleLabel = prefix === "3" ? "Student" : prefix === "2" ? "Assistant" : "Admin"
       toast({
         title: "Barcode Scanned!",
-        description: `Detected: ${trimmedCode}. Processing...`,
+        description: `Detected: ${trimmedCode} (${roleLabel}). Processing...`,
       })
-      console.log("Valid 4-digit barcode, processing:", trimmedCode)
+      console.log("Valid 6-digit barcode, processing:", trimmedCode)
       setTimeout(() => {
         processBarcode(trimmedCode)
       }, 500)
@@ -79,7 +81,7 @@ export default function ScannerPage() {
       console.log("Invalid barcode format:", trimmedCode, "Length:", trimmedCode.length)
       toast({
         title: "Invalid Barcode",
-        description: `Scanned: ${trimmedCode}. Barcode must be exactly 4 digits (e.g., 1001, 2001, 3001)`,
+        description: `Scanned: ${trimmedCode}. Must be 6 digits starting with 3 (student), 2 (assistant), or 1 (admin). Example: 300001`,
         variant: "destructive",
       })
       // Keep scanner running to try again
@@ -111,10 +113,10 @@ export default function ScannerPage() {
       return
     }
 
-    if (!/^\d{4}$/.test(code.trim())) {
+    if (!/^[123]\d{5}$/.test(code.trim())) {
       toast({
         title: "Invalid Barcode Format",
-        description: "Barcode must be exactly 4 digits (e.g., 1001, 2001, 3001)",
+        description: "Barcode must be 6 digits starting with 3 (student), 2 (assistant), or 1 (admin). Example: 300001",
         variant: "destructive",
       })
       return
