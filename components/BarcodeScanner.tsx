@@ -14,6 +14,7 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
   const quaggaRef = useRef<any>(null)
   const isRunningRef = useRef(false)
   const isMountedRef = useRef(true)
+  const lastDetectionRef = useRef<string>("")
 
   useEffect(() => {
     isMountedRef.current = true
@@ -80,12 +81,21 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
         // Set up detection handler
         const detectionHandler = (result: any) => {
           if (result && result.codeResult && result.codeResult.code) {
-            const code = result.codeResult.code
-            console.log("Barcode detected:", code)
+            const code = result.codeResult.code.trim()
+            console.log("Barcode detected:", code, "Type:", result.codeResult.format)
 
-            // Validate barcode format
-            if (/^\d{4}$/.test(code) || code.length > 0) {
+            // Prevent duplicate detections within 1 second
+            if (lastDetectionRef.current === code) {
+              return
+            }
+
+            lastDetectionRef.current = code
+
+            // Send the barcode immediately, let the scanner page validate
+            if (code && code.length > 0) {
+              console.log("Processing barcode:", code)
               onScanSuccess(code)
+
               // Stop after detection
               try {
                 Quagga.stop()
@@ -136,6 +146,7 @@ export default function BarcodeScanner({ onScanSuccess, isActive }: BarcodeScann
           Quagga.offDetected()
           Quagga.stop()
           isRunningRef.current = false
+          lastDetectionRef.current = ""
           console.log("Scanner stopped")
         } catch (e) {
           console.warn("Error stopping scanner:", e)

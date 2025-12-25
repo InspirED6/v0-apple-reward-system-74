@@ -59,25 +59,31 @@ export default function ScannerPage() {
   }, [router])
 
   const handleScanSuccess = (decodedText: string) => {
-    console.log("Barcode detected:", decodedText)
+    console.log("Barcode detected in handler:", decodedText)
 
-    if (/^\d{4}$/.test(decodedText)) {
-      setBarcode(decodedText)
+    const trimmedCode = decodedText.trim()
+
+    if (/^\d{4}$/.test(trimmedCode)) {
+      setBarcode(trimmedCode)
       setIsScanning(false)
       setCameraActive(false)
       toast({
         title: "Barcode Scanned!",
-        description: `Detected: ${decodedText}. Processing...`,
+        description: `Detected: ${trimmedCode}. Processing...`,
       })
+      console.log("Valid 4-digit barcode, processing:", trimmedCode)
       setTimeout(() => {
-        processBarcode(decodedText)
+        processBarcode(trimmedCode)
       }, 500)
     } else {
+      console.log("Invalid barcode format:", trimmedCode, "Length:", trimmedCode.length)
       toast({
         title: "Invalid Barcode",
-        description: "Scanned code must be 4 digits. Please try again.",
+        description: `Scanned: ${trimmedCode}. Barcode must be exactly 4 digits (e.g., 1001, 2001, 3001)`,
         variant: "destructive",
       })
+      // Keep scanner running to try again
+      setIsScanning(true)
     }
   }
 
