@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseClient } from "@/lib/db"
+import { getAssistantProfilePicture } from "@/lib/assistantProfilePictures"
 
 const BASE_SESSION_VALUE = 150
 const SESSION_INCREMENT = 20
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
             const sessionsAttended = assistant.sessions_attended || 0
             const currentSessionValue = calculateSessionValue(sessionsAttended)
             const milestonesReached = Math.floor(sessionsAttended / SESSIONS_PER_MILESTONE)
+            const profilePictureUrl = getAssistantProfilePicture(assistant.name)
 
             return {
               id: assistant.id,
@@ -69,6 +71,7 @@ export async function GET(request: NextRequest, { params }: { params: { name: st
               milestonesReached: milestonesReached,
               bonusCount: loyaltyHistory?.length || 0,
               loyaltyHistory: loyaltyHistory || [],
+              profilePictureUrl: profilePictureUrl,
             }
           }),
         )
