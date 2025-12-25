@@ -276,7 +276,7 @@ export default function ScannerPage() {
               </div>
               <div className="text-xs text-slate-400 space-y-1">
                 <div className="font-semibold">How to use:</div>
-                <div>Point camera at 4-digit barcodes (1001, 2001, 3001, etc.)</div>
+                <div>Point camera at 6-digit barcodes (3xxxxx, 2xxxxx, 1xxxxx)</div>
                 <div>Scanned barcodes will be automatically processed</div>
                 <div>You can also manually enter barcodes below</div>
               </div>
@@ -297,43 +297,43 @@ export default function ScannerPage() {
                 <label className="text-sm font-medium text-slate-200">Barcode</label>
                 <Input
                   type="text"
-                  placeholder="Enter 4-digit barcode (e.g., 1001, 2001, 3001)..."
+                  placeholder="Enter 6-digit barcode (e.g., 300001, 200001, 100001)..."
                   value={barcode}
                   onChange={(e) => {
-                    const value = e.target.value.replace(/\D/g, "").slice(0, 4)
+                    const value = e.target.value.replace(/\D/g, "").slice(0, 6)
                     setBarcode(value)
                   }}
                   className="bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400"
                   disabled={loading}
                   autoFocus
-                  maxLength={4}
+                  maxLength={6}
                 />
                 <p className="text-xs text-slate-400">
-                  Student barcodes start with 1, Admin with 2, Assistant with 3
+                  Student barcodes start with 3, Assistant with 2, Admin with 1
                 </p>
                 <div className="text-xs text-slate-500 space-y-1">
                   <div>Sample barcodes for testing:</div>
                   <div className="flex gap-2 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => setBarcode("1001")}
+                      onClick={() => setBarcode("300001")}
                       className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
                     >
-                      1001 (Student)
+                      300001 (Student)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setBarcode("2001")}
+                      onClick={() => setBarcode("200001")}
                       className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
                     >
-                      2001 (Admin)
+                      200001 (Assistant)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setBarcode("3001")}
+                      onClick={() => setBarcode("100001")}
                       className="px-2 py-1 bg-slate-700 rounded text-slate-300 hover:bg-slate-600"
                     >
-                      3001 (Assistant)
+                      100001 (Admin)
                     </button>
                   </div>
                 </div>
@@ -343,7 +343,7 @@ export default function ScannerPage() {
                 <Button
                   type="submit"
                   className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-semibold"
-                  disabled={loading || barcode.length !== 4}
+                  disabled={loading || barcode.length !== 6}
                 >
                   {loading ? "Processing..." : "Process Barcode"}
                 </Button>
