@@ -3,7 +3,7 @@ import { getSupabaseClient } from "@/lib/db"
 
 const BASE_SESSION_VALUE = 150
 const SESSION_INCREMENT = 20
-const SESSIONS_PER_MILESTONE = 4
+const SESSIONS_PER_MILESTONE = 20
 
 function calculateSessionValue(completedSessions: number): number {
   const milestones = Math.floor(completedSessions / SESSIONS_PER_MILESTONE)

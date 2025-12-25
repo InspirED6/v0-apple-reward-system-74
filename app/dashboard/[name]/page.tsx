@@ -363,15 +363,15 @@ export default function Dashboard({ params }: { params: { name: string } }) {
           </CardHeader>
           <CardContent className="text-sm text-slate-300">
             <p className="mb-2 text-lg">Current session value: <span className="text-emerald-400 font-bold">{userData.currentSessionValue || 150}</span> apples</p>
-            <p className="mb-2">Every 4 sessions, your session value increases by 20 apples!</p>
+            <p className="mb-2">Every 20 sessions, your session value increases by 20 apples!</p>
             <p className="text-xs text-slate-400">Sessions attended: {sessions} (Milestones: {userData.milestonesReached || 0})</p>
             <div className="mt-3 bg-slate-700/50 rounded-full h-2 overflow-hidden">
               <div
                 className="bg-gradient-to-r from-green-500 to-emerald-600 h-full transition-all"
-                style={{ width: `${Math.min(((sessions % 4) / 4) * 100, 100)}%` }}
+                style={{ width: `${Math.min(((sessions % 20) / 20) * 100, 100)}%` }}
               />
             </div>
-            <p className="text-xs text-slate-400 mt-1">{4 - (sessions % 4)} more sessions until next milestone (+20 to session value)</p>
+            <p className="text-xs text-slate-400 mt-1">{20 - (sessions % 20)} more sessions until next milestone (+20 to session value)</p>
           </CardContent>
         </Card>
 
